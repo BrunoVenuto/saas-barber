@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 
-type Barber = { id: string; name: string };
+type Barber = { id: string; name: string; barbershop_id: string | null };
 
-type Appointment = {
+type ServiceMini = { id: string; name: string; duration_minutes: number | null };
+
+type AppointmentRow = {
   id: string;
   date: string; // yyyy-mm-dd
   start_time: string; // HH:mm:ss
@@ -15,22 +17,28 @@ type Appointment = {
   service_id: string | null;
   client_name: string | null;
   client_phone: string | null;
+};
+
+type AppointmentUI = AppointmentRow & {
   barbers?: { name: string } | null;
   services?: { name: string; duration_minutes: number } | null;
 };
 
 function hhmm(t?: string | null) {
   if (!t) return "";
-  return t.slice(0, 5);
+  return String(t).slice(0, 5);
 }
 
 function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
 }
 
-function toBRPhoneDigits(phone: string) {
+function toWhatsAppDigits(phone: string) {
   const d = onlyDigits(phone);
-  return d.startsWith("55") ? d : `55${d}`;
+  if (!d) return "";
+  if (d.startsWith("55")) return d;
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d;
 }
 
 function todayYmd() {
@@ -44,8 +52,10 @@ function todayYmd() {
 export default function AdminAgendaPage() {
   const supabase = createClient();
 
+  const [barbershopId, setBarbershopId] = useState<string | null>(null);
+
   const [barbers, setBarbers] = useState<Barber[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentUI[]>([]);
 
   const [barberId, setBarberId] = useState<string>("all");
   const [date, setDate] = useState<string>(todayYmd());
@@ -55,47 +65,96 @@ export default function AdminAgendaPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 1) Load barbers (para filtro)
+  // 0) barbershop_id do admin logado
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase
-        .from("barbers")
-        .select("id, name")
-        .order("name");
+      setError(null);
 
-      if (error) {
-        setError(error.message);
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr) {
+        setError(userErr.message);
         return;
       }
 
-      setBarbers(data || []);
+      if (!user) {
+        setError("Você precisa estar logado.");
+        return;
+      }
+
+      const { data: profile, error: pErr } = await supabase
+        .from("profiles")
+        .select("role, barbershop_id")
+        .eq("id", user.id)
+        .single();
+
+      if (pErr) {
+        setError("Erro ao carregar profile: " + pErr.message);
+        return;
+      }
+
+      if (profile?.role !== "admin") {
+        setError("Acesso negado: você não é admin dessa barbearia.");
+        return;
+      }
+
+      if (!profile?.barbershop_id) {
+        setError("Seu usuário não está vinculado a nenhuma barbearia (barbershop_id = null).");
+        return;
+      }
+
+      setBarbershopId(profile.barbershop_id);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2) Load appointments conforme filtros
+  // 1) Load barbers (somente da barbearia)
+  useEffect(() => {
+    if (!barbershopId) return;
+
+    (async () => {
+      setError(null);
+
+      const { data, error } = await supabase
+        .from("barbers")
+        .select("id, name, barbershop_id")
+        .eq("barbershop_id", barbershopId)
+        .order("name", { ascending: true });
+
+      if (error) {
+        setError("Erro ao carregar barbeiros: " + error.message);
+        return;
+      }
+
+      setBarbers((data as Barber[]) || []);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barbershopId]);
+
+  // 2) Load appointments sem JOIN embutido (evita erro de relationship)
   async function loadAppointments() {
+    if (!barbershopId) return;
+
     setLoading(true);
     setError(null);
 
+    const barberIds = barbers.map((b) => b.id);
+
+    // Se ainda não carregou barbeiros, ou barbearia sem barbeiros
+    if (barberIds.length === 0) {
+      setAppointments([]);
+      setLoading(false);
+      return;
+    }
+
     let q = supabase
       .from("appointments")
-      .select(
-        `
-        id,
-        date,
-        start_time,
-        end_time,
-        status,
-        barber_id,
-        service_id,
-        client_name,
-        client_phone,
-        barbers:barber_id ( name ),
-        services:service_id ( name, duration_minutes )
-      `
-      )
+      .select("id,date,start_time,end_time,status,barber_id,service_id,client_name,client_phone")
       .eq("date", date)
+      .in("barber_id", barberIds)
       .order("start_time", { ascending: true });
 
     if (barberId !== "all") q = q.eq("barber_id", barberId);
@@ -104,30 +163,72 @@ export default function AdminAgendaPage() {
     const { data, error } = await q;
 
     if (error) {
-      setError(error.message);
+      setError("Erro ao carregar agendamentos: " + error.message);
       setAppointments([]);
       setLoading(false);
       return;
     }
 
-    setAppointments((data as any) || []);
+    const rows: AppointmentRow[] = (data as any[]) || [];
+
+    // Buscar serviços (para nome/duração)
+    const serviceIds = Array.from(
+      new Set(rows.map((r) => r.service_id).filter(Boolean) as string[])
+    );
+
+    let servicesMap = new Map<string, ServiceMini>();
+    if (serviceIds.length > 0) {
+      const { data: sData, error: sErr } = await supabase
+        .from("services")
+        .select("id,name,duration_minutes")
+        .in("id", serviceIds);
+
+      if (!sErr && sData) {
+        (sData as any[]).forEach((s) => {
+          servicesMap.set(s.id, {
+            id: s.id,
+            name: s.name,
+            duration_minutes: s.duration_minutes ?? null,
+          });
+        });
+      }
+    }
+
+    // Map de barbeiros
+    const barbersMap = new Map<string, Barber>();
+    barbers.forEach((b) => barbersMap.set(b.id, b));
+
+    // Monta UI igual antes (barbers/services como objetos)
+    const ui: AppointmentUI[] = rows.map((r) => {
+      const b = barbersMap.get(r.barber_id);
+      const s = r.service_id ? servicesMap.get(r.service_id) : null;
+
+      return {
+        ...r,
+        barbers: b ? { name: b.name } : null,
+        services: s
+          ? { name: s.name, duration_minutes: Number(s.duration_minutes ?? 0) }
+          : null,
+      };
+    });
+
+    setAppointments(ui);
     setLoading(false);
   }
 
+  // Recarrega quando muda filtros ou quando lista de barbeiros chega
   useEffect(() => {
+    if (!barbershopId) return;
     loadAppointments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barberId, date, status]);
+  }, [barbershopId, barbers, barberId, date, status]);
 
   // 3) Update status
   async function updateStatus(id: string, newStatus: string) {
     setUpdatingId(id);
     setError(null);
 
-    const { error } = await supabase
-      .from("appointments")
-      .update({ status: newStatus })
-      .eq("id", id);
+    const { error } = await supabase.from("appointments").update({ status: newStatus }).eq("id", id);
 
     if (error) {
       setError("Erro ao atualizar: " + error.message);
@@ -135,22 +236,19 @@ export default function AdminAgendaPage() {
       return;
     }
 
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
-    );
-
+    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a)));
     setUpdatingId(null);
   }
 
-  function openWhatsApp(ap: Appointment) {
-    const phone = ap.client_phone ? toBRPhoneDigits(ap.client_phone) : "";
+  function openWhatsApp(ap: AppointmentUI) {
+    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
     if (!phone) {
       alert("Esse agendamento não tem telefone do cliente.");
       return;
     }
 
     const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
-Seu agendamento na BRUNO BARBER SHOP:
+Seu agendamento:
 📅 ${ap.date}
 🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
 💈 ${ap.services?.name || "Serviço"}
@@ -165,11 +263,11 @@ Se precisar ajustar, responde aqui.`;
   // 4) Resumo
   const summary = useMemo(() => {
     const total = appointments.length;
-    const scheduled = appointments.filter((a) => a.status === "scheduled").length;
+    const pending = appointments.filter((a) => a.status === "pending" || a.status === "scheduled").length;
     const confirmed = appointments.filter((a) => a.status === "confirmed").length;
     const completed = appointments.filter((a) => a.status === "completed").length;
     const canceled = appointments.filter((a) => a.status === "canceled").length;
-    return { total, scheduled, confirmed, completed, canceled };
+    return { total, pending, confirmed, completed, canceled };
   }, [appointments]);
 
   return (
@@ -180,14 +278,13 @@ Se precisar ajustar, responde aqui.`;
             <h1 className="text-3xl md:text-5xl font-black">
               Agenda <span className="text-yellow-400">Admin</span>
             </h1>
-            <p className="text-zinc-400 mt-2">
-              Controle geral da barbearia — filtros, status e atendimento.
-            </p>
+            <p className="text-zinc-400 mt-2">Controle da sua barbearia — filtros, status e atendimento.</p>
           </div>
 
           <button
             onClick={loadAppointments}
-            className="px-6 py-3 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition"
+            disabled={!barbershopId}
+            className="px-6 py-3 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition disabled:opacity-50"
           >
             Atualizar
           </button>
@@ -201,6 +298,7 @@ Se precisar ajustar, responde aqui.`;
               value={barberId}
               onChange={(e) => setBarberId(e.target.value)}
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
+              disabled={!barbershopId}
             >
               <option value="all">Todos</option>
               {barbers.map((b) => (
@@ -218,6 +316,7 @@ Se precisar ajustar, responde aqui.`;
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
+              disabled={!barbershopId}
             />
           </div>
 
@@ -227,9 +326,10 @@ Se precisar ajustar, responde aqui.`;
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
+              disabled={!barbershopId}
             >
               <option value="all">Todos</option>
-              <option value="scheduled">Agendado</option>
+              <option value="pending">Pendente</option>
               <option value="confirmed">Confirmado</option>
               <option value="completed">Concluído</option>
               <option value="canceled">Cancelado</option>
@@ -244,8 +344,8 @@ Se precisar ajustar, responde aqui.`;
             <p className="text-2xl font-black">{summary.total}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-2xl p-4">
-            <p className="text-zinc-400 text-sm">Agendados</p>
-            <p className="text-2xl font-black text-yellow-300">{summary.scheduled}</p>
+            <p className="text-zinc-400 text-sm">Pendentes</p>
+            <p className="text-2xl font-black text-yellow-300">{summary.pending}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-2xl p-4">
             <p className="text-zinc-400 text-sm">Confirmados</p>
@@ -262,7 +362,7 @@ Se precisar ajustar, responde aqui.`;
         </section>
 
         {error && (
-          <div className="bg-red-950/40 border border-red-500/30 text-red-200 rounded-xl p-4">
+          <div className="bg-red-950/40 border border-red-500/30 text-red-200 rounded-xl p-4 whitespace-pre-line">
             {error}
           </div>
         )}
@@ -294,18 +394,14 @@ Se precisar ajustar, responde aqui.`;
                       </span>
 
                       <span className="text-zinc-300">
-                        <span className="font-semibold">
-                          {ap.services?.name || "Serviço"}
-                        </span>
+                        <span className="font-semibold">{ap.services?.name || "Serviço"}</span>
                       </span>
 
                       <span className="text-zinc-500">•</span>
 
                       <span className="text-zinc-300">
                         Barbeiro:{" "}
-                        <span className="text-white font-semibold">
-                          {ap.barbers?.name || "—"}
-                        </span>
+                        <span className="text-white font-semibold">{ap.barbers?.name || "—"}</span>
                       </span>
 
                       <span className="text-zinc-500">•</span>
@@ -314,7 +410,7 @@ Se precisar ajustar, responde aqui.`;
                         className={`font-black ${
                           ap.status === "confirmed"
                             ? "text-green-400"
-                            : ap.status === "scheduled"
+                            : ap.status === "pending" || ap.status === "scheduled"
                             ? "text-yellow-300"
                             : ap.status === "completed"
                             ? "text-white"
@@ -323,19 +419,15 @@ Se precisar ajustar, responde aqui.`;
                             : "text-zinc-300"
                         }`}
                       >
-                        {ap.status}
+                        {ap.status === "scheduled" ? "pending" : ap.status}
                       </span>
                     </div>
 
                     <div className="text-sm text-zinc-400">
                       Cliente:{" "}
-                      <span className="text-zinc-200 font-semibold">
-                        {ap.client_name || "—"}
-                      </span>{" "}
+                      <span className="text-zinc-200 font-semibold">{ap.client_name || "—"}</span>{" "}
                       • Tel:{" "}
-                      <span className="text-zinc-200 font-semibold">
-                        {ap.client_phone || "—"}
-                      </span>
+                      <span className="text-zinc-200 font-semibold">{ap.client_phone || "—"}</span>
                     </div>
                   </div>
 

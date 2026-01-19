@@ -24,6 +24,13 @@ export default async function AdminLayout({
           </Link>
 
           <Link
+            href="/admin/relatorios"
+            className="px-4 py-2 rounded hover:bg-zinc-800"
+          >
+            📈 Relatórios
+          </Link>
+
+          <Link
             href="/admin/barbeiros"
             className="px-4 py-2 rounded hover:bg-zinc-800"
           >

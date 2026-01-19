@@ -1,218 +1,454 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { Card } from "@/components/ui/Card";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+type Barber = { id: string; name: string; barbershop_id: string | null };
 
-type BarberStat = {
+type ServiceMini = {
+  id: string;
   name: string;
-  total: number;
+  duration_minutes: number | null;
+  price: number | null;
 };
 
-type ServiceStat = {
-  name: string;
-  total: number;
+type AppointmentRow = {
+  id: string;
+  date: string; // yyyy-mm-dd
+  status: string;
+  barber_id: string;
+  service_id: string | null;
 };
+
+type Stat = { name: string; total: number };
+
+function ymd(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function monthKeyNow() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`; // YYYY-MM
+}
+
+function monthRange(monthKey: string) {
+  const [yStr, mStr] = monthKey.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const start = new Date(y, m - 1, 1);
+  const end = new Date(y, m, 0);
+  return { startYmd: ymd(start), endYmd: ymd(end) };
+}
+
+function normalizeStatus(s: string) {
+  if (s === "scheduled") return "pending";
+  if (s === "done") return "completed";
+  if (s === "cancelled") return "canceled";
+  return s;
+}
 
 export default function AdminRelatoriosPage() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
+  const [barbershopId, setBarbershopId] = useState<string | null>(null);
 
-  const [total, setTotal] = useState(0);
-  const [scheduled, setScheduled] = useState(0);
-  const [done, setDone] = useState(0);
-  const [cancelled, setCancelled] = useState(0);
+  const [month, setMonth] = useState<string>(monthKeyNow());
 
-  const [byBarber, setByBarber] = useState<BarberStat[]>([]);
-  const [byService, setByService] = useState<ServiceStat[]>([]);
+  const [barbers, setBarbers] = useState<Barber[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
+  const [servicesMap, setServicesMap] = useState<Record<string, ServiceMini>>(
+    {}
+  );
 
+  const [error, setError] = useState<string | null>(null);
+
+  // 0) descobrir barbershop_id do admin logado
   useEffect(() => {
-    loadReports();
+    (async () => {
+      setError(null);
+
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr) {
+        setError(userErr.message);
+        return;
+      }
+
+      if (!user) {
+        setError("Você precisa estar logado.");
+        return;
+      }
+
+      const { data: profile, error: pErr } = await supabase
+        .from("profiles")
+        .select("role, barbershop_id")
+        .eq("id", user.id)
+        .single();
+
+      if (pErr) {
+        setError("Erro ao carregar profile: " + pErr.message);
+        return;
+      }
+
+      if (profile?.role !== "admin") {
+        setError("Acesso negado: você não é admin dessa barbearia.");
+        return;
+      }
+
+      if (!profile?.barbershop_id) {
+        setError("Seu usuário não está vinculado a nenhuma barbearia.");
+        return;
+      }
+
+      setBarbershopId(profile.barbershop_id);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadReports() {
-    setLoading(true);
+  // 1) carregar barbeiros do tenant
+  useEffect(() => {
+    if (!barbershopId) return;
 
-    const { data: appointments, error } = await supabase
-      .from("appointments")
-      .select(
-        `
-        id,
-        status,
-        barbers(name),
-        services(name)
-      `
+    (async () => {
+      setError(null);
+
+      const { data, error } = await supabase
+        .from("barbers")
+        .select("id,name,barbershop_id")
+        .eq("barbershop_id", barbershopId)
+        .order("name", { ascending: true });
+
+      if (error) {
+        setError("Erro ao carregar barbeiros: " + error.message);
+        return;
+      }
+
+      setBarbers((data as Barber[]) || []);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barbershopId]);
+
+  // 2) carregar appointments do mês (sem join embutido)
+  useEffect(() => {
+    if (!barbershopId) return;
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+
+      const barberIds = barbers.map((b) => b.id);
+      if (barberIds.length === 0) {
+        setAppointments([]);
+        setServicesMap({});
+        setLoading(false);
+        return;
+      }
+
+      const { startYmd, endYmd } = monthRange(month);
+
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("id,date,status,barber_id,service_id")
+        .in("barber_id", barberIds)
+        .gte("date", startYmd)
+        .lte("date", endYmd);
+
+      if (error) {
+        setError("Erro ao carregar agendamentos: " + error.message);
+        setAppointments([]);
+        setServicesMap({});
+        setLoading(false);
+        return;
+      }
+
+      const rows: AppointmentRow[] = ((data as any[]) || []).map((a) => ({
+        id: a.id,
+        date: a.date,
+        status: normalizeStatus(a.status),
+        barber_id: a.barber_id,
+        service_id: a.service_id,
+      }));
+
+      setAppointments(rows);
+
+      const serviceIds = Array.from(
+        new Set(rows.map((r) => r.service_id).filter(Boolean) as string[])
       );
 
-    if (error || !appointments) {
-      alert("Erro ao carregar relatórios");
+      if (serviceIds.length === 0) {
+        setServicesMap({});
+        setLoading(false);
+        return;
+      }
+
+      const { data: sData, error: sErr } = await supabase
+        .from("services")
+        .select("id,name,duration_minutes,price")
+        .in("id", serviceIds);
+
+      if (sErr) {
+        setServicesMap({});
+        setLoading(false);
+        return;
+      }
+
+      const map: Record<string, ServiceMini> = {};
+      (sData as any[] | null)?.forEach((s) => {
+        map[s.id] = {
+          id: s.id,
+          name: s.name,
+          duration_minutes: s.duration_minutes ?? null,
+          price: s.price ?? null,
+        };
+      });
+
+      setServicesMap(map);
       setLoading(false);
-      return;
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barbershopId, barbers, month]);
+
+  // ===== KPIs =====
+  const kpis = useMemo(() => {
+    const total = appointments.length;
+    const pending = appointments.filter((a) => a.status === "pending").length;
+    const confirmed = appointments.filter((a) => a.status === "confirmed").length;
+    const completed = appointments.filter((a) => a.status === "completed").length;
+    const canceled = appointments.filter((a) => a.status === "canceled").length;
+
+    let revenue = 0;
+    for (const ap of appointments) {
+      if (ap.status !== "completed") continue;
+      if (!ap.service_id) continue;
+      const s = servicesMap[ap.service_id];
+      if (!s?.price) continue;
+      revenue += Number(s.price);
     }
 
-    // Totais
-    const totalCount = appointments.length;
-    const scheduledCount = appointments.filter(
-      (a) => a.status === "scheduled"
-    ).length;
-    const doneCount = appointments.filter((a) => a.status === "done").length;
-    const cancelledCount = appointments.filter(
-      (a) => a.status === "cancelled"
-    ).length;
+    return { total, pending, confirmed, completed, canceled, revenue };
+  }, [appointments, servicesMap]);
 
-    setTotal(totalCount);
-    setScheduled(scheduledCount);
-    setDone(doneCount);
-    setCancelled(cancelledCount);
+  const byBarber = useMemo<Stat[]>(() => {
+    const map: Record<string, number> = {};
+    const barberNameById: Record<string, string> = {};
+    barbers.forEach((b) => (barberNameById[b.id] = b.name));
 
-    // Agrupar por barbeiro
-    const barberMap: Record<string, number> = {};
-    appointments.forEach((a: any) => {
-      const name = a.barbers?.name || "Desconhecido";
-      barberMap[name] = (barberMap[name] || 0) + 1;
+    appointments.forEach((a) => {
+      const name = barberNameById[a.barber_id] || "Desconhecido";
+      map[name] = (map[name] || 0) + 1;
     });
 
-    const barberRanking = Object.entries(barberMap)
+    return Object.entries(map)
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total);
+  }, [appointments, barbers]);
 
-    setByBarber(barberRanking);
+  const byService = useMemo<Stat[]>(() => {
+    const map: Record<string, number> = {};
 
-    // Agrupar por serviço
-    const serviceMap: Record<string, number> = {};
-    appointments.forEach((a: any) => {
-      const name = a.services?.name || "Desconhecido";
-      serviceMap[name] = (serviceMap[name] || 0) + 1;
+    appointments.forEach((a) => {
+      const name = a.service_id ? servicesMap[a.service_id]?.name : null;
+      const label = name || "Desconhecido";
+      map[label] = (map[label] || 0) + 1;
     });
 
-    const serviceRanking = Object.entries(serviceMap)
+    return Object.entries(map)
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total);
+  }, [appointments, servicesMap]);
 
-    setByService(serviceRanking);
+  const chartData = useMemo(() => {
+    return [
+      { name: "Pendentes", value: kpis.pending },
+      { name: "Confirmados", value: kpis.confirmed },
+      { name: "Concluídos", value: kpis.completed },
+      { name: "Cancelados", value: kpis.canceled },
+    ].filter((x) => x.value > 0);
+  }, [kpis]);
 
-    setLoading(false);
+  const COLORS = ["#f59e0b", "#3b82f6", "#22c55e", "#ef4444"];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
+        <div className="text-zinc-300">Carregando relatórios...</div>
+      </div>
+    );
   }
 
-  const chartData = [
-    { name: "Agendados", value: scheduled },
-    { name: "Concluídos", value: done },
-    { name: "Cancelados", value: cancelled },
-  ];
-
-  const COLORS = ["#f59e0b", "#22c55e", "#ef4444"];
-
-  if (loading) return <div className="p-10">Carregando relatórios...</div>;
-
   return (
-    <div className="p-10 space-y-10">
-      <h1 className="text-3xl font-black text-white">
-        📊 Relatórios do Sistema
-      </h1>
+    <div className="min-h-screen bg-black text-white">
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-10 space-y-6 sm:space-y-8">
+        {/* Header */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black">📊 Relatórios</h1>
+            <p className="text-zinc-400 mt-2 text-sm sm:text-base">
+              Resumo e rankings do mês selecionado (apenas sua barbearia).
+            </p>
+          </div>
 
-      {/* Cards resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <p className="text-sm opacity-70">Total</p>
-          <p className="text-4xl font-black text-orange-400">{total}</p>
-        </Card>
+          <div className="bg-zinc-950 border border-white/10 rounded-2xl p-4 w-full md:w-auto">
+            <label className="block text-sm text-zinc-400 mb-2">Mês</label>
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-full md:w-[220px] bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none text-white"
+            />
+          </div>
+        </div>
 
-        <Card>
-          <p className="text-sm opacity-70">Agendados</p>
-          <p className="text-4xl font-black text-yellow-400">
-            {scheduled}
-          </p>
-        </Card>
+        {error && (
+          <div className="bg-red-950/40 border border-red-500/30 text-red-200 rounded-xl p-4 whitespace-pre-line">
+            {error}
+          </div>
+        )}
 
-        <Card>
-          <p className="text-sm opacity-70">Concluídos</p>
-          <p className="text-4xl font-black text-green-400">{done}</p>
-        </Card>
+        {/* KPIs - responsivo */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-6">
+          <Card>
+            <p className="text-sm opacity-70">Total</p>
+            <p className="text-3xl sm:text-4xl font-black text-orange-400">
+              {kpis.total}
+            </p>
+          </Card>
 
+          <Card>
+            <p className="text-sm opacity-70">Pendentes</p>
+            <p className="text-3xl sm:text-4xl font-black text-yellow-300">
+              {kpis.pending}
+            </p>
+          </Card>
+
+          <Card>
+            <p className="text-sm opacity-70">Confirmados</p>
+            <p className="text-3xl sm:text-4xl font-black text-blue-300">
+              {kpis.confirmed}
+            </p>
+          </Card>
+
+          <Card>
+            <p className="text-sm opacity-70">Concluídos</p>
+            <p className="text-3xl sm:text-4xl font-black text-green-400">
+              {kpis.completed}
+            </p>
+          </Card>
+
+          <Card>
+            <p className="text-sm opacity-70">Cancelados</p>
+            <p className="text-3xl sm:text-4xl font-black text-red-400">
+              {kpis.canceled}
+            </p>
+          </Card>
+
+          <Card>
+            <p className="text-sm opacity-70">Faturamento (estim.)</p>
+            <p className="text-2xl sm:text-3xl font-black text-emerald-300">
+              R$ {kpis.revenue.toFixed(2)}
+            </p>
+            <p className="text-xs text-zinc-500 mt-2">
+              Soma de serviços dos “concluídos”.
+            </p>
+          </Card>
+        </div>
+
+        {/* Bloco: Gráfico + Ranking (lado a lado no desktop) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          {/* Gráfico */}
+          <Card>
+            <h2 className="text-lg sm:text-xl font-bold mb-4">
+              Distribuição por status (mês)
+            </h2>
+
+            {chartData.length === 0 ? (
+              <p className="text-zinc-400">Sem dados no período.</p>
+            ) : (
+              <div className="w-full h-72 sm:h-80 md:h-96">
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={chartData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={110}
+                      label
+                    >
+                      {chartData.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+
+          {/* Ranking barbeiros */}
+          <Card>
+            <h2 className="text-lg sm:text-xl font-bold mb-4">
+              Ranking de barbeiros (mês)
+            </h2>
+
+            {byBarber.length === 0 ? (
+              <p className="text-zinc-400">Sem dados.</p>
+            ) : (
+              <div className="space-y-2">
+                {byBarber.map((b, i) => (
+                  <div
+                    key={b.name}
+                    className="flex items-center justify-between gap-3 border-b border-white/10 pb-2"
+                  >
+                    <span className="text-sm sm:text-base truncate">
+                      {i + 1}. {b.name}
+                    </span>
+                    <span className="font-bold shrink-0">{b.total}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* Ranking serviços */}
         <Card>
-          <p className="text-sm opacity-70">Cancelados</p>
-          <p className="text-4xl font-black text-red-400">
-            {cancelled}
-          </p>
+          <h2 className="text-lg sm:text-xl font-bold mb-4">
+            Serviços mais realizados (mês)
+          </h2>
+
+          {byService.length === 0 ? (
+            <p className="text-zinc-400">Sem dados.</p>
+          ) : (
+            <div className="space-y-2">
+              {byService.map((s, i) => (
+                <div
+                  key={s.name}
+                  className="flex items-center justify-between gap-3 border-b border-white/10 pb-2"
+                >
+                  <span className="text-sm sm:text-base truncate">
+                    {i + 1}. {s.name}
+                  </span>
+                  <span className="font-bold shrink-0">{s.total}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
-
-      {/* Gráfico */}
-      <Card>
-        <h2 className="text-xl font-bold mb-4">
-          Distribuição dos Atendimentos
-        </h2>
-
-        <div style={{ width: "100%", height: 300 }}>
-          <ResponsiveContainer>
-            <PieChart>
-              <Pie
-                data={chartData}
-                dataKey="value"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                outerRadius={100}
-                label
-              >
-                {chartData.map((_, index) => (
-                  <Cell key={index} fill={COLORS[index]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-
-      {/* Ranking barbeiros */}
-      <Card>
-        <h2 className="text-xl font-bold mb-4">
-          Ranking de Barbeiros
-        </h2>
-        <div className="space-y-2">
-          {byBarber.map((b, i) => (
-            <div
-              key={b.name}
-              className="flex justify-between border-b border-white/10 pb-2"
-            >
-              <span>
-                {i + 1}. {b.name}
-              </span>
-              <span className="font-bold">{b.total}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Ranking serviços */}
-      <Card>
-        <h2 className="text-xl font-bold mb-4">
-          Serviços Mais Realizados
-        </h2>
-        <div className="space-y-2">
-          {byService.map((s, i) => (
-            <div
-              key={s.name}
-              className="flex justify-between border-b border-white/10 pb-2"
-            >
-              <span>
-                {i + 1}. {s.name}
-              </span>
-              <span className="font-bold">{s.total}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }
