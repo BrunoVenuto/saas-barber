@@ -1,101 +1,103 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
-export default function Home() {
+export default function LandingPage() {
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <main className="min-h-screen bg-background text-white">
+      {/* HERO */}
+      <section className="max-w-7xl mx-auto px-10 py-32 grid md:grid-cols-2 gap-16 items-center">
+        <div className="space-y-8">
+          <h1 className="text-5xl md:text-6xl font-black leading-tight">
+            Transforme sua{" "}
+            <span className="text-orange-400">barbearia</span> em uma máquina de
+            agendamentos automática
+          </h1>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          <p className="text-lg text-white/70">
+            Um sistema moderno para gerenciar clientes, barbeiros e horários —
+            tudo automático, sem bagunça e sem perder dinheiro.
+          </p>
+
+          <div className="flex gap-4">
+            <Link href="/login">
+              <Button variant="primary" className="text-lg px-8 py-4">
+                🚀 Testar agora
+              </Button>
+            </Link>
+
+            <a
+              href="https://wa.me/5531995453632"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Button variant="ghost" className="text-lg px-8 py-4">
+                💬 Falar no WhatsApp
+              </Button>
+            </a>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        <Card className="p-10">
+          <p className="text-xl font-bold text-orange-400 mb-4">
+            O que você ganha:
+          </p>
+          <ul className="space-y-3 text-white/80">
+            <li>✅ Clientes marcam sozinhos</li>
+            <li>✅ Agenda organizada automaticamente</li>
+            <li>✅ Menos faltas e confusão</li>
+            <li>✅ Controle total da barbearia</li>
+            <li>✅ Visual profissional</li>
+          </ul>
+        </Card>
+      </section>
+
+      {/* BENEFÍCIOS */}
+      <section className="max-w-7xl mx-auto px-10 py-24 grid md:grid-cols-3 gap-8">
+        <Card>
+          <h3 className="text-xl font-bold text-orange-400 mb-2">
+            📅 Agenda Inteligente
+          </h3>
+          <p className="text-white/70">
+            O sistema só mostra horários livres e evita conflitos
+            automaticamente.
+          </p>
+        </Card>
+
+        <Card>
+          <h3 className="text-xl font-bold text-orange-400 mb-2">
+            ✂️ Gestão de Barbeiros
+          </h3>
+          <p className="text-white/70">
+            Cada barbeiro tem sua própria agenda e painel profissional.
+          </p>
+        </Card>
+
+        <Card>
+          <h3 className="text-xl font-bold text-orange-400 mb-2">
+            📊 Controle Total
+          </h3>
+          <p className="text-white/70">
+            Veja relatórios, histórico e estatísticas da barbearia.
+          </p>
+        </Card>
+      </section>
+
+      {/* CTA FINAL */}
+      <section className="text-center py-32 space-y-8">
+        <h2 className="text-4xl font-black">
+          Comece a usar hoje mesmo
+        </h2>
+        <p className="text-white/60">
+          Leva menos de 2 minutos para testar o sistema.
+        </p>
+
+        <Link href="/login">
+          <Button variant="primary" className="text-lg px-10 py-4">
+            🔥 Quero testar agora
+          </Button>
+        </Link>
+      </section>
+    </main>
   );
 }

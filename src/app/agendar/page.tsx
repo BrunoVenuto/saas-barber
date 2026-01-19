@@ -1,0 +1,297 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/browser";
+
+type Barber = {
+  id: string;
+  name: string;
+};
+
+type Service = {
+  id: string;
+  name: string;
+  duration_minutes: number;
+};
+
+type WorkingHour = {
+  weekday: number;
+  start_time: string;
+  end_time: string;
+};
+
+type Appointment = {
+  start_time: string;
+  end_time: string;
+};
+
+export default function PublicBookingPage() {
+  const supabase = createClient();
+  const params = useParams();
+
+  const slug = params.slug as string;
+
+  const [barbershop, setBarbershop] = useState<any>(null);
+  const [barbers, setBarbers] = useState<Barber[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+
+  const [selectedBarber, setSelectedBarber] = useState("");
+  const [selectedService, setSelectedService] = useState("");
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+
+  const [workingHours, setWorkingHours] = useState<WorkingHour[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+
+  const [loading, setLoading] = useState(false);
+
+  // =========================
+  // LOAD BARBERSHOP
+  // =========================
+  useEffect(() => {
+    async function load() {
+      const { data: shop } = await supabase
+        .from("barbershops")
+        .select("*")
+        .eq("slug", slug)
+        .single();
+
+      if (!shop) return;
+
+      setBarbershop(shop);
+
+      const { data: b } = await supabase
+        .from("barbers")
+        .select("id, name")
+        .eq("barbershop_id", shop.id)
+        .order("name");
+
+      const { data: s } = await supabase
+        .from("services")
+        .select("id, name, duration_minutes")
+        .eq("barbershop_id", shop.id)
+        .order("name");
+
+      setBarbers(b || []);
+      setServices(s || []);
+    }
+
+    load();
+  }, [slug]);
+
+  // =========================
+  // LOAD DAY DATA
+  // =========================
+  useEffect(() => {
+    async function loadDay() {
+      if (!selectedBarber || !date) return;
+
+      setTime("");
+
+      const d = new Date(date);
+      const weekday = d.getDay() === 0 ? 7 : d.getDay(); // 1-7
+
+      // 🔹 working hours
+      const { data: wh } = await supabase
+        .from("working_hours")
+        .select("weekday, start_time, end_time")
+        .eq("barber_id", selectedBarber)
+        .eq("weekday", weekday);
+
+      // 🔹 appointments
+      const { data: ap } = await supabase
+        .from("appointments")
+        .select("start_time, end_time")
+        .eq("barber_id", selectedBarber)
+        .eq("date", date)
+        .eq("status", "scheduled");
+
+      setWorkingHours(wh || []);
+      setAppointments(ap || []);
+    }
+
+    loadDay();
+  }, [selectedBarber, date]);
+
+  // =========================
+  // HELPERS
+  // =========================
+  function timeToMinutes(t: string) {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  }
+
+  function minutesToTime(m: number) {
+    const h = Math.floor(m / 60)
+      .toString()
+      .padStart(2, "0");
+    const min = (m % 60).toString().padStart(2, "0");
+    return `${h}:${min}`;
+  }
+
+  // =========================
+  // BUILD SLOTS
+  // =========================
+  const slots: string[] = useMemo(() => {
+    if (!selectedService) return [];
+    if (workingHours.length === 0) return [];
+
+    const service = services.find((s) => s.id === selectedService);
+    if (!service) return [];
+
+    const duration = service.duration_minutes;
+
+    const occupied =
+      appointments.map((a) => ({
+        start: timeToMinutes(a.start_time),
+        end: timeToMinutes(a.end_time),
+      })) || [];
+
+    const result: string[] = [];
+
+    for (const wh of workingHours) {
+      let start = timeToMinutes(wh.start_time);
+      const end = timeToMinutes(wh.end_time);
+
+      while (start + duration <= end) {
+        const slotStart = start;
+        const slotEnd = start + duration;
+
+        const conflict = occupied.some(
+          (o) => !(slotEnd <= o.start || slotStart >= o.end)
+        );
+
+        if (!conflict) {
+          result.push(minutesToTime(slotStart));
+        }
+
+        start += 30;
+      }
+    }
+
+    return result;
+  }, [workingHours, appointments, selectedService]);
+
+  // =========================
+  // SUBMIT
+  // =========================
+  async function handleSubmit() {
+    if (!selectedBarber || !selectedService || !date || !time) {
+      alert("Preencha tudo.");
+      return;
+    }
+
+    setLoading(true);
+
+    const service = services.find((s) => s.id === selectedService);
+    if (!service) return;
+
+    const startMin = timeToMinutes(time);
+    const endMin = startMin + service.duration_minutes;
+
+    const start_time = time;
+    const end_time = minutesToTime(endMin);
+
+    const { error } = await supabase.from("appointments").insert({
+      barber_id: selectedBarber,
+      service_id: selectedService,
+      client_id: null,
+      date,
+      start_time,
+      end_time,
+      status: "scheduled",
+    });
+
+    if (error) {
+      alert("Erro ao criar agendamento: " + error.message);
+      setLoading(false);
+      return;
+    }
+
+    alert("✅ Agendado com sucesso!");
+    setLoading(false);
+  }
+
+  // =========================
+  // UI
+  // =========================
+  return (
+    <div className="min-h-screen bg-black text-white p-8 max-w-4xl mx-auto space-y-6">
+      <h1 className="text-4xl font-black text-yellow-400">
+        Agende seu horário
+      </h1>
+
+      {/* SELECTORS */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <select
+          className="p-3 rounded bg-zinc-900 border border-white/10"
+          value={selectedBarber}
+          onChange={(e) => setSelectedBarber(e.target.value)}
+        >
+          <option value="">Selecione o barbeiro</option>
+          {barbers.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          className="p-3 rounded bg-zinc-900 border border-white/10"
+          value={selectedService}
+          onChange={(e) => setSelectedService(e.target.value)}
+        >
+          <option value="">Selecione o serviço</option>
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.duration_minutes} min)
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <input
+        type="date"
+        className="p-3 rounded bg-zinc-900 border border-white/10"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+      />
+
+      {/* SLOTS */}
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+        {slots.length === 0 && (
+          <p className="opacity-60">Nenhum horário disponível.</p>
+        )}
+
+        {slots.map((t) => {
+          const isSelected = t === time;
+
+          return (
+            <button
+              key={t}
+              onClick={() => setTime(t)}
+              className={`py-2 rounded font-bold transition
+                ${
+                  isSelected
+                    ? "bg-yellow-400 text-black"
+                    : "bg-green-600 hover:bg-green-500 text-white"
+                }
+              `}
+            >
+              {t}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        disabled={loading}
+        onClick={handleSubmit}
+        className="w-full bg-yellow-400 text-black font-black py-4 rounded text-lg"
+      >
+        {loading ? "Agendando..." : "Confirmar Agendamento"}
+      </button>
+    </div>
+  );
+}
