@@ -19,20 +19,37 @@ type Appointment = {
   service_name?: string | null;
 };
 
-const CANCEL_MINUTES_NOTICE = 60; // ✅ antecedência mínima p/ permitir cancelamento
+const CANCEL_MINUTES_NOTICE = 60; // antecedência mínima p/ permitir cancelamento
 
 function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
 }
 
-function toBRPhoneDigits(phone: string) {
+/**
+ * WhatsApp:
+ * - Se vier 10/11 dígitos (DDD+num BR), prefixa 55
+ * - Se já vier com 55, mantém
+ * - Se vier internacional diferente, mantém do jeito que vier (sem forçar)
+ */
+function toWhatsAppDigits(phone: string) {
   const d = onlyDigits(phone);
-  return d.startsWith("55") ? d : `55${d}`;
+  if (!d) return "";
+  if (d.startsWith("55")) return d;
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d;
 }
 
 function hhmm(t: string) {
   if (!t) return "";
-  return t.slice(0, 5);
+  return String(t).slice(0, 5);
+}
+
+function todayYmd() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 // Converte (date yyyy-mm-dd + start_time HH:mm[:ss]) para Date local
@@ -54,13 +71,7 @@ export default function BarberDashboardPage() {
   const supabase = createClient();
 
   const [barber, setBarber] = useState<Barber | null>(null);
-  const [day, setDay] = useState(() => {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  });
+  const [day, setDay] = useState<string>(todayYmd());
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -69,6 +80,7 @@ export default function BarberDashboardPage() {
 
   // --------------------------
   // Load barber linked to user
+  // ✅ CORRIGIDO: usa barbers.user_id
   // --------------------------
   useEffect(() => {
     (async () => {
@@ -92,12 +104,17 @@ export default function BarberDashboardPage() {
       const b = await supabase
         .from("barbers")
         .select("id, name")
-        .eq("profile_id", user.id)
+        .eq("user_id", user.id)
         .maybeSingle();
+
+      if (b.error) {
+        setStatusMsg("Erro ao buscar barbeiro: " + b.error.message);
+        return;
+      }
 
       if (!b.data) {
         setStatusMsg(
-          "Não encontrei o barbeiro vinculado a esse login. Verifique se barbers.profile_id está preenchido."
+          "Não encontrei o barbeiro vinculado a esse login. Verifique se barbers.user_id está preenchido."
         );
         return;
       }
@@ -162,37 +179,36 @@ export default function BarberDashboardPage() {
   }, [barber?.id, day]);
 
   // --------------------------
-  // WhatsApp helper (confirm/cancel)
+  // WhatsApp helper
   // --------------------------
   function openWhatsAppConfirm(ap: Appointment) {
-    const phone = ap.client_phone ? toBRPhoneDigits(ap.client_phone) : "";
+    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
     if (!phone) {
       alert("Esse agendamento não tem telefone do cliente.");
       return false;
     }
 
     const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
-Confirmando seu agendamento na ${barber?.name || "barbearia"}:
+Confirmando seu agendamento:
 📅 ${ap.date}
 🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
 💈 ${ap.service_name || "Serviço"}
 
 Está tudo certo?`;
 
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
     return true;
   }
 
   function openWhatsAppCancel(ap: Appointment) {
-    const phone = ap.client_phone ? toBRPhoneDigits(ap.client_phone) : "";
+    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
     if (!phone) {
       alert("Esse agendamento não tem telefone do cliente.");
       return false;
     }
 
     const msg = `Olá, ${ap.client_name || "tudo bem?"}!
-⚠️ Precisamos cancelar seu agendamento na ${barber?.name || "barbearia"}.
+⚠️ Precisamos cancelar seu agendamento.
 
 📅 ${ap.date}
 🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
@@ -200,8 +216,7 @@ Está tudo certo?`;
 
 Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
 
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
     return true;
   }
 
@@ -210,6 +225,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
   // --------------------------
   async function confirmAppointment(ap: Appointment) {
     if (!barber) return;
+
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
@@ -239,7 +255,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
   async function cancelAppointment(ap: Appointment) {
     if (!barber) return;
 
-    // ✅ Regra de antecedência
+    // regra de antecedência
     const mins = minutesUntil(ap);
     if (mins < CANCEL_MINUTES_NOTICE) {
       alert(
@@ -258,10 +274,10 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    // 1) avisa no WhatsApp primeiro (com antecedência)
+    // 1) avisa WhatsApp
     openWhatsAppCancel(ap);
 
-    // 2) cancela no banco via API server
+    // 2) cancela via API
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/cancel`, {
       method: "POST",
     });
@@ -341,9 +357,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Confirmados</p>
-            <p className="text-2xl font-black text-green-400">
-              {summary.confirmed}
-            </p>
+            <p className="text-2xl font-black text-green-400">{summary.confirmed}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Cancelados</p>
@@ -362,8 +376,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
         <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
           <div className="p-4 md:p-6 border-b border-white/10 flex items-center justify-between">
             <h2 className="text-xl font-black">
-              Agendamentos do dia{" "}
-              <span className="text-yellow-400">{day}</span>
+              Agendamentos do dia <span className="text-yellow-400">{day}</span>
             </h2>
             {loading && <span className="text-zinc-400">Carregando...</span>}
           </div>
@@ -375,7 +388,8 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
 
             {appointments.map((ap) => {
               const mins = minutesUntil(ap);
-              const canCancel = mins >= CANCEL_MINUTES_NOTICE && ap.status !== "canceled";
+              const canCancel =
+                mins >= CANCEL_MINUTES_NOTICE && ap.status !== "canceled";
 
               return (
                 <div

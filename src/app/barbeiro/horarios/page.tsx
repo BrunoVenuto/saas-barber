@@ -13,25 +13,36 @@ const daysOfWeek = [
   { value: 6, label: "Sábado" },
 ];
 
-type Availability = {
+type WorkingHour = {
   id: string;
-  day_of_week: number;
+  weekday: number;
   start_time: string;
   end_time: string;
+  barber_id: string | null;
+  barbershop_id: string;
 };
+
+function toHHMM(t: string) {
+  if (!t) return "";
+  return String(t).slice(0, 5);
+}
 
 export default function BarbeiroHorariosPage() {
   const supabase = createClient();
 
   const [barberId, setBarberId] = useState<string | null>(null);
-  const [availability, setAvailability] = useState<Availability[]>([]);
-  const [day, setDay] = useState(1);
+  const [barbershopId, setBarbershopId] = useState<string | null>(null);
+
+  const [hours, setHours] = useState<WorkingHour[]>([]);
+
+  const [weekday, setWeekday] = useState<number>(1);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("18:00");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     loadBarber();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadBarber() {
@@ -41,39 +52,50 @@ export default function BarbeiroHorariosPage() {
 
     if (!user) return;
 
-    const { data: barber } = await supabase
+    // Precisamos do barbeiro vinculado ao user_id
+    const { data: barber, error } = await supabase
       .from("barbers")
-      .select("id")
+      .select("id, barbershop_id")
       .eq("user_id", user.id)
       .single();
 
-    if (!barber) {
+    if (error || !barber) {
       alert("Este usuário não está vinculado a um barbeiro.");
       return;
     }
 
     setBarberId(barber.id);
-    loadAvailability(barber.id);
+    setBarbershopId(barber.barbershop_id);
+    await loadHours(barber.barbershop_id, barber.id);
   }
 
-  async function loadAvailability(bid: string) {
-    const { data } = await supabase
-      .from("barber_availability")
-      .select("*")
-      .eq("barber_id", bid)
-      .order("day_of_week");
+  async function loadHours(bsId: string, bId: string) {
+    const { data, error } = await supabase
+      .from("working_hours")
+      .select("id, weekday, start_time, end_time, barber_id, barbershop_id")
+      .eq("barbershop_id", bsId)
+      .eq("barber_id", bId)
+      .order("weekday", { ascending: true })
+      .order("start_time", { ascending: true });
 
-    if (data) setAvailability(data);
+    if (error) {
+      alert("Erro ao carregar horários: " + error.message);
+      setHours([]);
+      return;
+    }
+
+    setHours((data as WorkingHour[]) || []);
   }
 
-  async function addAvailability() {
-    if (!barberId) return;
+  async function addHour() {
+    if (!barberId || !barbershopId) return;
 
     setLoading(true);
 
-    const { error } = await supabase.from("barber_availability").insert({
+    const { error } = await supabase.from("working_hours").insert({
+      barbershop_id: barbershopId,
       barber_id: barberId,
-      day_of_week: day,
+      weekday,
       start_time: startTime,
       end_time: endTime,
     });
@@ -85,29 +107,33 @@ export default function BarbeiroHorariosPage() {
     }
 
     setLoading(false);
-    loadAvailability(barberId);
+    await loadHours(barbershopId, barberId);
   }
 
-  async function removeAvailability(id: string) {
+  async function removeHour(id: string) {
+    if (!barberId || !barbershopId) return;
     if (!confirm("Deseja remover este horário?")) return;
 
-    await supabase.from("barber_availability").delete().eq("id", id);
+    const { error } = await supabase.from("working_hours").delete().eq("id", id);
 
-    if (barberId) loadAvailability(barberId);
+    if (error) {
+      alert("Erro ao remover: " + error.message);
+      return;
+    }
+
+    await loadHours(barbershopId, barberId);
   }
 
   return (
     <div className="p-10 space-y-6 max-w-2xl">
-      <h1 className="text-3xl font-bold text-primary">
-        Meus Horários de Trabalho
-      </h1>
+      <h1 className="text-3xl font-bold text-primary">Meus Horários de Trabalho</h1>
 
       <div className="bg-surface p-6 rounded space-y-4">
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-4">
           <select
             className="p-2 bg-black border border-white/10 rounded"
-            value={day}
-            onChange={(e) => setDay(Number(e.target.value))}
+            value={weekday}
+            onChange={(e) => setWeekday(Number(e.target.value))}
           >
             {daysOfWeek.map((d) => (
               <option key={d.value} value={d.value}>
@@ -131,40 +157,43 @@ export default function BarbeiroHorariosPage() {
           />
 
           <button
-            onClick={addAvailability}
-            disabled={loading}
-            className="bg-primary text-black px-4 rounded font-bold"
+            onClick={addHour}
+            disabled={loading || !barberId || !barbershopId}
+            className="bg-primary text-black px-4 py-2 rounded font-bold"
           >
             {loading ? "Salvando..." : "Adicionar"}
           </button>
         </div>
+
+        <p className="text-xs text-zinc-400">
+          Esses horários alimentam diretamente o agendamento público.
+        </p>
       </div>
 
       <div className="space-y-3">
-        {availability.map((a) => (
-          <div
-            key={a.id}
-            className="bg-surface p-4 rounded flex justify-between"
-          >
-            <div>
-              <p className="font-bold text-primary">
-                {
-                  daysOfWeek.find((d) => d.value === a.day_of_week)?.label
-                }
-              </p>
-              <p>
-                {a.start_time} - {a.end_time}
-              </p>
-            </div>
-
-            <button
-              onClick={() => removeAvailability(a.id)}
-              className="text-red-500"
+        {hours.length === 0 ? (
+          <div className="text-zinc-400">Nenhum horário cadastrado ainda.</div>
+        ) : (
+          hours.map((h) => (
+            <div
+              key={h.id}
+              className="bg-surface p-4 rounded flex justify-between items-center"
             >
-              Remover
-            </button>
-          </div>
-        ))}
+              <div>
+                <p className="font-bold text-primary">
+                  {daysOfWeek.find((d) => d.value === Number(h.weekday))?.label}
+                </p>
+                <p>
+                  {toHHMM(h.start_time)} - {toHHMM(h.end_time)}
+                </p>
+              </div>
+
+              <button onClick={() => removeHour(h.id)} className="text-red-500">
+                Remover
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
