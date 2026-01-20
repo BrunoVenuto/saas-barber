@@ -70,6 +70,17 @@ export default function AdminRelatoriosPage() {
 
   const [error, setError] = useState<string | null>(null);
 
+  // Mobile helper (para labels do gráfico)
+  const [isSmall, setIsSmall] = useState(false);
+  useEffect(() => {
+    function onResize() {
+      setIsSmall(window.innerWidth < 420);
+    }
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // 0) descobrir barbershop_id do admin logado
   useEffect(() => {
     (async () => {
@@ -316,7 +327,7 @@ export default function AdminRelatoriosPage() {
           </div>
         )}
 
-        {/* KPIs - responsivo */}
+        {/* KPIs - mobile-first */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-6">
           <Card>
             <p className="text-sm opacity-70">Total</p>
@@ -364,7 +375,7 @@ export default function AdminRelatoriosPage() {
           </Card>
         </div>
 
-        {/* Bloco: Gráfico + Ranking (lado a lado no desktop) */}
+        {/* Gráfico + Ranking */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* Gráfico */}
           <Card>
@@ -375,25 +386,41 @@ export default function AdminRelatoriosPage() {
             {chartData.length === 0 ? (
               <p className="text-zinc-400">Sem dados no período.</p>
             ) : (
-              <div className="w-full h-72 sm:h-80 md:h-96">
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie
-                      data={chartData}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={110}
-                      label
+              <div className="w-full">
+                {/* Wrapper “à prova de mobile” */}
+                <div className="mx-auto w-full max-w-[320px] sm:max-w-[360px] md:max-w-[420px] aspect-square overflow-hidden">
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={chartData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={isSmall ? 92 : 120}
+                        label={!isSmall}
+                      >
+                        {chartData.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Legenda (melhor no mobile do que label no gráfico) */}
+                <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                  {chartData.map((d, i) => (
+                    <div
+                      key={d.name}
+                      className="rounded-xl bg-white/5 border border-white/10 px-3 py-2 flex items-center justify-between gap-2"
                     >
-                      {chartData.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                      <span className="truncate">{d.name}</span>
+                      <span className="font-black">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </Card>

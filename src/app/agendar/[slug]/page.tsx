@@ -405,58 +405,135 @@ export default function AgendarPremiumPage() {
 
       {/* TOP NAV */}
       <header className="sticky top-0 z-40">
-        <div className="px-4 sm:px-6 lg:px-10 pt-4">
-          <div className="mx-auto max-w-7xl rounded-[22px] border border-white/10 bg-black/35 backdrop-blur-md shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
-            <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="h-11 w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center shrink-0">
-                  <span className="text-yellow-200 font-black">IB</span>
+        <div className="px-3 sm:px-6 lg:px-10 pt-3 sm:pt-4">
+          <div className="mx-auto max-w-7xl rounded-[22px] border border-white/10 bg-black/40 backdrop-blur-md shadow-[0_20px_60px_rgba(0,0,0,0.65)]">
+            <div className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3">
+              {/* LEFT: logo + titles */}
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center shrink-0">
+                  <span className="text-yellow-200 font-black text-sm sm:text-base">
+                    IB
+                  </span>
                 </div>
+
+                {/* ✅ No mobile NÃO truncar: deixa quebrar linha se precisar */}
                 <div className="min-w-0">
-                  <p className="font-black tracking-tight truncate">{shop.name}</p>
-                  <p className="text-[11px] text-white/60 -mt-0.5 truncate">
+                  <p className="font-black tracking-tight text-sm sm:text-base leading-tight whitespace-normal break-words sm:truncate">
+                    {shop.name}
+                  </p>
+                  {/* Subtítulo só a partir de sm (tablet/desktop) */}
+                  <p className="hidden sm:block text-[11px] text-white/60 -mt-0.5 truncate">
                     {shop.city || "Barbearia"} • Old School • Premium
                   </p>
                 </div>
               </div>
 
-              <nav className="hidden md:flex items-center gap-6 text-sm text-white/75">
-                <a href="#agendar" className="hover:text-white transition">
-                  Agendar
-                </a>
-                <a href="#servicos" className="hover:text-white transition">
-                  Serviços
-                </a>
-                <a href="#mestres" className="hover:text-white transition">
-                  Mestres
-                </a>
-                <a href="#contato" className="hover:text-white transition">
-                  Contato
-                </a>
-              </nav>
+              {/* DESKTOP: menu + agendar */}
+              <div className="hidden md:flex items-center gap-6 shrink-0">
+                <nav className="flex items-center gap-6 text-sm text-white/75">
+                  <a href="#sobre" className="hover:text-white transition">
+                    Sobre
+                  </a>
+                  <a href="#servicos" className="hover:text-white transition">
+                    Serviços
+                  </a>
+                  <a href="#mestres" className="hover:text-white transition">
+                    Mestres
+                  </a>
+                  <a href="#contato" className="hover:text-white transition">
+                    Contato
+                  </a>
+                </nav>
 
-              <div className="flex items-center gap-2">
-                <Link
-                  href={`/b/${shop.slug}`}
-                  className="hidden sm:inline-flex px-4 py-2.5 rounded-2xl font-black bg-white/10 border border-white/10 hover:bg-white/15 transition"
-                >
-                  Voltar
-                </Link>
                 <a
                   href="#agendar"
-                  className={clsx(
-                    "px-4 sm:px-5 py-2.5 rounded-2xl font-black text-black",
+                  className={[
+                    "inline-flex items-center justify-center",
+                    "h-11 px-5",
+                    "rounded-2xl font-black text-black whitespace-nowrap",
                     "bg-yellow-400 hover:brightness-110 transition",
-                    "shadow-[0_0_0_1px_rgba(255,220,120,0.35),0_10px_40px_rgba(0,0,0,0.45)]"
-                  )}
+                    "shadow-[0_0_0_1px_rgba(255,220,120,0.35),0_12px_45px_rgba(0,0,0,0.55)]",
+                  ].join(" ")}
                 >
                   Agendar
                 </a>
+              </div>
+
+              {/* MOBILE: hamburger menu (com Agendar dentro) */}
+              <div className="md:hidden shrink-0">
+                <details className="relative">
+                  <summary
+                    aria-label="Abrir menu"
+                    className={[
+                      "list-none cursor-pointer select-none",
+                      "h-10 w-10 rounded-2xl",
+                      "bg-white/10 border border-white/10",
+                      "grid place-items-center",
+                      "hover:bg-white/15 transition",
+                    ].join(" ")}
+                  >
+                    {/* Ícone hambúrguer */}
+                    <span className="block w-5">
+                      <span className="block h-[2px] w-5 bg-white/80 rounded" />
+                      <span className="block h-[2px] w-5 bg-white/80 rounded mt-1.5" />
+                      <span className="block h-[2px] w-5 bg-white/80 rounded mt-1.5" />
+                    </span>
+                  </summary>
+
+                  {/* Dropdown */}
+                  <div className="absolute right-0 mt-3 w-[260px] rounded-2xl border border-white/10 bg-black/85 backdrop-blur-md shadow-[0_20px_60px_rgba(0,0,0,0.75)] overflow-hidden">
+                    <div className="p-3">
+                      <a
+                        href="#agendar"
+                        className={[
+                          "h-11 w-full rounded-2xl font-black text-black",
+                          "bg-yellow-400 hover:brightness-110 transition",
+                          "grid place-items-center",
+                          "shadow-[0_0_0_1px_rgba(255,220,120,0.25)]",
+                        ].join(" ")}
+                      >
+                        Agendar
+                      </a>
+                    </div>
+
+                    <div className="border-t border-white/10">
+                      <a
+                        href="#sobre"
+                        className="block px-4 py-3 text-sm text-white/85 hover:bg-white/10 transition"
+                      >
+                        Sobre
+                      </a>
+                      <a
+                        href="#servicos"
+                        className="block px-4 py-3 text-sm text-white/85 hover:bg-white/10 transition"
+                      >
+                        Serviços
+                      </a>
+                      <a
+                        href="#mestres"
+                        className="block px-4 py-3 text-sm text-white/85 hover:bg-white/10 transition"
+                      >
+                        Mestres
+                      </a>
+                      <a
+                        href="#contato"
+                        className="block px-4 py-3 text-sm text-white/85 hover:bg-white/10 transition"
+                      >
+                        Contato
+                      </a>
+                    </div>
+
+                    <div className="px-4 py-3 text-[11px] text-white/55 border-t border-white/10">
+                      {shop.city || "Barbearia"} • Old School • Premium
+                    </div>
+                  </div>
+                </details>
               </div>
             </div>
           </div>
         </div>
       </header>
+
 
       {/* HERO */}
       <section className="px-4 sm:px-6 lg:px-10 pt-6 pb-10">

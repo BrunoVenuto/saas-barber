@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-black text-white">
+    <main className="min-h-screen bg-black text-white overflow-x-hidden">
       {/* Fundo madeira + vinheta pesada */}
       <div
         className="fixed inset-0 -z-20"
@@ -18,31 +18,35 @@ export default function LandingPage() {
       <div className="fixed inset-0 -z-10 shadow-[inset_0_0_220px_rgba(0,0,0,0.95)]" />
       <div className="fixed inset-0 -z-10 shadow-[inset_0_0_90px_rgba(0,0,0,0.9)]" />
 
-      {/* “Palco” central arredondado (igual vibe da referência) */}
+      {/* “Palco” central arredondado */}
       <div className="px-4 sm:px-6 lg:px-10 py-6 sm:py-8">
-        <div className="mx-auto max-w-7xl">
+        <div className="mx-auto max-w-7xl w-full">
           <div className="relative rounded-[34px] overflow-hidden border border-white/10 bg-black/25 backdrop-blur-md shadow-[0_30px_120px_rgba(0,0,0,0.75)]">
             {/* brilho sutil dourado nas bordas */}
             <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_120px_rgba(255,200,40,0.12)]" />
             <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_60px_rgba(0,0,0,0.65)]" />
 
             {/* Topbar estilo “glass” */}
+            {/* ✅ Header com menu hamburguer no mobile (sem useState) */}
             <header className="relative z-10 px-4 sm:px-6 lg:px-8 py-4 border-b border-white/10 bg-black/25">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-11 w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/30 grid place-items-center shadow-[0_0_35px_rgba(255,210,80,0.18)]">
+              <div className="flex items-center justify-between gap-2 sm:gap-3">
+                {/* Brand */}
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-11 w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/30 grid place-items-center shadow-[0_0_35px_rgba(255,210,80,0.18)] shrink-0">
                     <span className="text-yellow-300 font-black">BP</span>
                   </div>
-                  <div className="leading-tight">
-                    <p className="font-black tracking-tight text-base sm:text-lg">
+
+                  <div className="leading-tight min-w-0">
+                    <p className="font-black tracking-tight text-base sm:text-lg truncate">
                       Barber Premium
                     </p>
-                    <p className="text-xs text-white/65 -mt-0.5">
+                    <p className="text-xs text-white/65 -mt-0.5 truncate">
                       SaaS de agendamento para barbearias
                     </p>
                   </div>
                 </div>
 
+                {/* Desktop nav */}
                 <nav className="hidden md:flex items-center gap-6 text-sm text-white/80">
                   <a href="#recursos" className="hover:text-white transition">
                     Recursos
@@ -53,9 +57,13 @@ export default function LandingPage() {
                   <a href="#exemplo" className="hover:text-white transition">
                     Exemplo
                   </a>
+                  <a href="#planos" className="hover:text-white transition">
+                    Planos
+                  </a>
                 </nav>
 
-                <div className="flex items-center gap-2">
+                {/* Desktop actions */}
+                <div className="hidden md:flex items-center gap-2 shrink-0">
                   <Link
                     href="/login"
                     className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition font-bold"
@@ -69,14 +77,86 @@ export default function LandingPage() {
                     Começar
                   </Link>
                 </div>
+
+                {/* Mobile menu (details/summary) */}
+                <div className="md:hidden shrink-0">
+                  <details className="group relative">
+                    <summary className="list-none cursor-pointer select-none">
+                      <div className="h-11 w-11 rounded-2xl bg-white/10 border border-white/10 hover:bg-white/15 transition grid place-items-center">
+                        {/* Ícone hamburger */}
+                        <svg
+                          className="h-5 w-5 text-white/85"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M4 6h16M4 12h16M4 18h16"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </div>
+                    </summary>
+
+                    {/* Dropdown */}
+                    <div className="absolute right-0 mt-3 w-[min(86vw,360px)] rounded-2xl border border-white/10 bg-black/70 backdrop-blur-md shadow-[0_25px_80px_rgba(0,0,0,0.75)] overflow-hidden">
+                      <div className="p-3">
+                        <a
+                          href="#recursos"
+                          className="block px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition text-white/90 font-bold"
+                        >
+                          Recursos
+                        </a>
+                        <a
+                          href="#como-funciona"
+                          className="mt-2 block px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition text-white/90 font-bold"
+                        >
+                          Como funciona
+                        </a>
+                        <a
+                          href="#exemplo"
+                          className="mt-2 block px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition text-white/90 font-bold"
+                        >
+                          Exemplo
+                        </a>
+                        <a
+                          href="#planos"
+                          className="mt-2 block px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition text-white/90 font-bold"
+                        >
+                          Planos
+                        </a>
+
+                        <div className="mt-3 pt-3 border-t border-white/10 grid grid-cols-2 gap-2">
+                          <Link
+                            href="/login"
+                            className="h-11 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition font-black grid place-items-center"
+                          >
+                            Entrar
+                          </Link>
+                          <Link
+                            href="/login"
+                            className="h-11 rounded-xl bg-yellow-400 text-black font-black hover:brightness-110 transition grid place-items-center shadow-[0_14px_55px_rgba(255,215,70,0.25)]"
+                          >
+                            Começar
+                          </Link>
+                        </div>
+
+                        <p className="mt-3 text-[11px] text-white/55 px-1">
+                          Toque fora para fechar o menu.
+                        </p>
+                      </div>
+                    </div>
+                  </details>
+                </div>
               </div>
             </header>
 
             {/* HERO */}
             <section className="relative">
-              {/* imagem hero dentro do palco */}
               <div
-                className="relative h-[360px] sm:h-[460px] lg:h-[520px]"
+                className="relative min-h-[520px] sm:min-h-[560px] lg:min-h-[620px]"
                 style={{
                   backgroundImage:
                     "url(https://images.unsplash.com/photo-1599351431202-1e0f0137899a?q=80&w=2400&auto=format&fit=crop)",
@@ -85,50 +165,45 @@ export default function LandingPage() {
                   filter: "saturate(1.05) contrast(1.05)",
                 }}
               >
-                {/* overlay igual referência: escurece, mas deixa a imagem viva */}
                 <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/20" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
 
-                {/* Conteúdo */}
-                <div className="absolute inset-0 px-4 sm:px-6 lg:px-10 py-8 sm:py-10">
-                  <div className="h-full flex items-end">
-                    <div className="max-w-2xl">
-                      <p className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400/15 border border-yellow-300/25 text-yellow-200 text-xs font-bold shadow-[0_0_35px_rgba(255,210,80,0.12)]">
-                        ⚡ Agendamento online + confirmação no WhatsApp
-                      </p>
+                <div className="relative z-10 px-4 sm:px-6 lg:px-10 py-10 sm:py-12 h-full flex items-end">
+                  <div className="max-w-2xl">
+                    <p className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400/15 border border-yellow-300/25 text-yellow-200 text-xs font-bold shadow-[0_0_35px_rgba(255,210,80,0.12)]">
+                      ⚡ Agendamento online + confirmação no WhatsApp
+                    </p>
 
-                      <h1 className="mt-4 text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight">
-                        A cara <span className="text-yellow-300">premium</span>{" "}
-                        da sua barbearia — com agenda organizada
-                      </h1>
+                    <h1 className="mt-4 text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight">
+                      A cara <span className="text-yellow-300">premium</span>{" "}
+                      da sua barbearia — com agenda organizada
+                    </h1>
 
-                      <p className="mt-4 text-white/80 text-base sm:text-lg leading-relaxed">
-                        Seu cliente agenda em segundos. O barbeiro confirma e
-                        cancela com antecedência pelo WhatsApp. Tudo separado por
-                        barbearia (multi-tenant), com painel do dono e painel do barbeiro.
-                      </p>
+                    <p className="mt-4 text-white/80 text-base sm:text-lg leading-relaxed">
+                      Seu cliente agenda em segundos. O barbeiro confirma e cancela
+                      com antecedência pelo WhatsApp. Tudo separado por barbearia
+                      (multi-tenant), com painel do dono e painel do barbeiro.
+                    </p>
 
-                      <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                        <Link
-                          href="/login"
-                          className="h-12 sm:h-14 px-8 rounded-2xl bg-yellow-400 text-black font-black grid place-items-center hover:brightness-110 transition shadow-[0_16px_60px_rgba(255,215,70,0.28)]"
-                        >
-                          🚀 Testar agora
-                        </Link>
+                    <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                      <Link
+                        href="/login"
+                        className="h-12 sm:h-14 px-8 rounded-2xl bg-yellow-400 text-black font-black grid place-items-center hover:brightness-110 transition shadow-[0_16px_60px_rgba(255,215,70,0.28)]"
+                      >
+                        🚀 Testar agora
+                      </Link>
 
-                        <a
-                          href="#exemplo"
-                          className="h-12 sm:h-14 px-8 rounded-2xl bg-white/10 border border-white/10 font-black grid place-items-center hover:bg-white/15 transition"
-                        >
-                          Ver exemplo de landing
-                        </a>
-                      </div>
+                      <a
+                        href="#exemplo"
+                        className="h-12 sm:h-14 px-8 rounded-2xl bg-white/10 border border-white/10 font-black grid place-items-center hover:bg-white/15 transition"
+                      >
+                        Ver exemplo de landing
+                      </a>
                     </div>
                   </div>
                 </div>
 
-                {/* CTA “flutuante” estilo referência (canto direito) */}
-                <div className="hidden lg:block absolute right-10 bottom-10">
+                <div className="hidden lg:block absolute right-10 bottom-10 z-10">
                   <Link
                     href="/login"
                     className="px-10 py-4 rounded-2xl bg-yellow-400 text-black font-black text-lg hover:brightness-110 transition shadow-[0_18px_70px_rgba(255,215,70,0.34)]"
@@ -167,50 +242,231 @@ export default function LandingPage() {
                   Recursos <span className="text-yellow-300">principais</span>
                 </h2>
                 <p className="text-white/70 mt-2 max-w-2xl">
-                  Painel do dono, painel do barbeiro, agenda por slots e landing premium
-                  para conversão.
+                  Painel do dono, painel do barbeiro, agenda por slots e landing
+                  premium para conversão.
                 </p>
 
                 <div className="mt-5 grid md:grid-cols-2 gap-4">
                   <div className="rounded-3xl bg-black/35 border border-white/10 p-6 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-                    <p className="font-black text-yellow-200 text-lg">📅 Agenda por slots</p>
+                    <p className="font-black text-yellow-200 text-lg">
+                      📅 Agenda por slots
+                    </p>
                     <p className="text-sm text-white/70 mt-2">
-                      Horários gerados pela duração do serviço e bloqueio automático de horários ocupados.
+                      Horários gerados pela duração do serviço e bloqueio automático
+                      de horários ocupados.
                     </p>
                   </div>
 
                   <div className="rounded-3xl bg-black/35 border border-white/10 p-6 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-                    <p className="font-black text-yellow-200 text-lg">💬 WhatsApp integrado</p>
+                    <p className="font-black text-yellow-200 text-lg">
+                      💬 WhatsApp integrado
+                    </p>
                     <p className="text-sm text-white/70 mt-2">
-                      Confirmação e cancelamento com mensagem pronta. Cliente deixa nome e WhatsApp no agendamento.
+                      Confirmação e cancelamento com mensagem pronta. Cliente deixa
+                      nome e WhatsApp no agendamento.
                     </p>
                   </div>
 
                   <div className="rounded-3xl bg-black/35 border border-white/10 p-6 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-                    <p className="font-black text-yellow-200 text-lg">💈 Painel do barbeiro</p>
+                    <p className="font-black text-yellow-200 text-lg">
+                      💈 Painel do barbeiro
+                    </p>
                     <p className="text-sm text-white/70 mt-2">
-                      Lista do dia com status, confirmação/cancelamento e regra de antecedência.
+                      Lista do dia com status, confirmação/cancelamento e regra de
+                      antecedência.
                     </p>
                   </div>
 
                   <div className="rounded-3xl bg-black/35 border border-white/10 p-6 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-                    <p className="font-black text-yellow-200 text-lg">📊 Relatórios</p>
+                    <p className="font-black text-yellow-200 text-lg">
+                      📊 Relatórios
+                    </p>
                     <p className="text-sm text-white/70 mt-2">
-                      Ranking de serviços e faturamento estimado por período (por barbearia).
+                      Ranking de serviços e faturamento estimado por período (por
+                      barbearia).
                     </p>
                   </div>
                 </div>
               </div>
+
+              {/* PLANOS */}
+              <section id="planos" className="py-16">
+                <div className="mx-auto max-w-7xl">
+                  <div className="text-center max-w-3xl mx-auto">
+                    <h2 className="text-3xl sm:text-4xl font-black">
+                      Planos <span className="text-yellow-400">simples</span> e
+                      direto ao ponto
+                    </h2>
+                    <p className="text-white/70 mt-4">
+                      Escolha o plano ideal para sua barbearia e comece a receber
+                      agendamentos ainda hoje.
+                    </p>
+                  </div>
+
+                  <div className="mt-12 grid md:grid-cols-3 gap-6">
+                    <div className="rounded-[28px] border border-white/10 bg-black/40 backdrop-blur-md p-6 shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+                      <h3 className="text-xl font-black">Start</h3>
+                      <p className="text-white/60 text-sm mt-1">
+                        Para quem está começando
+                      </p>
+
+                      <p className="mt-6 text-4xl font-black text-yellow-300">
+                        R$ 39<span className="text-lg text-white/60">/mês</span>
+                      </p>
+
+                      <ul className="mt-6 space-y-3 text-sm text-white/80">
+                        <li>✅ 1 barbearia</li>
+                        <li>✅ Até 2 barbeiros</li>
+                        <li>✅ Agenda online</li>
+                        <li>✅ Confirmação por WhatsApp</li>
+                        <li>❌ Sem personalização visual</li>
+                      </ul>
+
+                      <a
+                        href="/auth/register"
+                        className="mt-8 h-12 rounded-xl bg-white/10 border border-white/15 hover:bg-white/15 transition font-black grid place-items-center"
+                      >
+                        Começar
+                      </a>
+                    </div>
+
+                    <div className="relative rounded-[28px] border-2 border-yellow-400 bg-black/50 backdrop-blur-md p-6 shadow-[0_25px_80px_rgba(0,0,0,0.8)] md:scale-[1.03]">
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-yellow-400 text-black text-xs font-black px-4 py-1 rounded-full">
+                        MAIS VENDIDO
+                      </div>
+
+                      <h3 className="text-xl font-black">Profissional</h3>
+                      <p className="text-white/60 text-sm mt-1">
+                        Para barbearias de verdade
+                      </p>
+
+                      <p className="mt-6 text-4xl font-black text-yellow-300">
+                        R$ 79<span className="text-lg text-white/60">/mês</span>
+                      </p>
+
+                      <ul className="mt-6 space-y-3 text-sm text-white/90">
+                        <li>✅ 1 barbearia</li>
+                        <li>✅ Barbeiros ilimitados</li>
+                        <li>✅ Agenda online</li>
+                        <li>✅ Confirmação e cancelamento por WhatsApp</li>
+                        <li>✅ Landing page premium</li>
+                        <li>✅ Painel do dono e do barbeiro</li>
+                      </ul>
+
+                      <a
+                        href="/auth/register"
+                        className="mt-8 h-12 rounded-xl bg-yellow-400 text-black font-black grid place-items-center hover:brightness-110 transition"
+                      >
+                        Começar agora
+                      </a>
+                    </div>
+
+                    <div className="rounded-[28px] border border-white/10 bg-black/40 backdrop-blur-md p-6 shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+                      <h3 className="text-xl font-black">Premium</h3>
+                      <p className="text-white/60 text-sm mt-1">
+                        Para quem quer escalar
+                      </p>
+
+                      <p className="mt-6 text-4xl font-black text-yellow-300">
+                        R$ 129<span className="text-lg text-white/60">/mês</span>
+                      </p>
+
+                      <ul className="mt-6 space-y-3 text-sm text-white/80">
+                        <li>✅ Múltiplas barbearias</li>
+                        <li>✅ Barbeiros ilimitados</li>
+                        <li>✅ Personalização de cores e logo</li>
+                        <li>✅ Prioridade no suporte</li>
+                        <li>✅ Tudo do plano Profissional</li>
+                      </ul>
+
+                      <a
+                        href="/auth/register"
+                        className="mt-8 h-12 rounded-xl bg-white/10 border border-white/15 hover:bg-white/15 transition font-black grid place-items-center"
+                      >
+                        Falar com vendas
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* PROVA SOCIAL */}
+              <section className="pb-20">
+                <div className="mx-auto max-w-7xl">
+                  <div className="rounded-[34px] border border-white/10 bg-black/40 backdrop-blur-md p-6 sm:p-8 shadow-[0_25px_80px_rgba(0,0,0,0.7)]">
+                    <div className="text-center max-w-3xl mx-auto">
+                      <h2 className="text-3xl sm:text-4xl font-black">
+                        Barbeiros que já{" "}
+                        <span className="text-yellow-400">estão usando</span>
+                      </h2>
+                      <p className="text-white/70 mt-3">
+                        Quem usa, não volta mais para agenda de papel ou WhatsApp
+                        bagunçado.
+                      </p>
+                    </div>
+
+                    <div className="mt-10 grid md:grid-cols-3 gap-6">
+                      {[
+                        {
+                          name: "Barbearia do Antônio",
+                          text: "Depois que comecei a usar o Barber Premium, minha agenda ficou organizada e os clientes confirmam sozinhos no WhatsApp.",
+                        },
+                        {
+                          name: "Iron Beard",
+                          text: "Reduzi quase 80% dos furos de agenda. Hoje está tudo automático.",
+                        },
+                        {
+                          name: "Barber Pro",
+                          text: "Passei uma imagem muito mais profissional. Os clientes elogiam a facilidade.",
+                        },
+                      ].map((t) => (
+                        <div
+                          key={t.name}
+                          className="rounded-2xl bg-white/5 border border-white/10 p-5"
+                        >
+                          <p className="text-white/80 text-sm leading-relaxed">
+                            “{t.text}”
+                          </p>
+                          <p className="mt-4 text-sm font-black text-yellow-300">
+                            {t.name}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                      {[
+                        ["+120", "Barbearias"],
+                        ["+15 mil", "Agendamentos"],
+                        ["-70%", "No-show"],
+                        ["+3x", "Mais organização"],
+                      ].map(([v, l]) => (
+                        <div
+                          key={l}
+                          className="rounded-2xl bg-white/5 border border-white/10 p-4"
+                        >
+                          <p className="text-2xl font-black text-yellow-300">
+                            {v}
+                          </p>
+                          <p className="text-xs text-white/70 mt-1">{l}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </section>
 
               {/* Exemplo */}
               <div className="mt-12" id="exemplo">
                 <div className="rounded-[28px] border border-white/10 bg-black/30 overflow-hidden">
                   <div className="p-6 sm:p-8 border-b border-white/10">
                     <h3 className="text-xl sm:text-2xl font-black">
-                      Exemplo de landing <span className="text-yellow-300">premium</span>
+                      Exemplo de landing{" "}
+                      <span className="text-yellow-300">premium</span>
                     </h3>
                     <p className="text-white/70 mt-2">
-                      O template da barbearia vai seguir essa vibe amadeirada e dourada.
+                      O template da barbearia vai seguir essa vibe amadeirada e
+                      dourada.
                     </p>
                   </div>
 
@@ -228,7 +484,9 @@ export default function LandingPage() {
                       </div>
                       <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
                         <p className="text-xs text-white/60">Objetivo</p>
-                        <p className="font-black">Converter visitante em agendamento</p>
+                        <p className="font-black">
+                          Converter visitante em agendamento
+                        </p>
                       </div>
 
                       <div className="pt-2">
@@ -319,7 +577,8 @@ export default function LandingPage() {
             {/* Footer dentro do palco */}
             <footer className="px-4 sm:px-6 lg:px-8 pb-8 pt-2 border-t border-white/10 bg-black/20">
               <div className="text-center text-xs text-white/55">
-                © {new Date().getFullYear()} Barber Premium — Todos os direitos reservados.
+                © {new Date().getFullYear()} Barber Premium — Todos os direitos
+                reservados.
               </div>
             </footer>
           </div>
