@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
@@ -195,9 +194,10 @@ export default function AgendarPremiumPage() {
     if (svErr) setMsg((prev) => prev || "Erro ao carregar serviços: " + svErr.message);
     if (hErr) setMsg((prev) => prev || "Erro ao carregar horários: " + hErr.message);
 
-    setBarbers((bData as any) || []);
-    setServices((svData as any) || []);
-    setHours((hData as any) || []);
+    setBarbers(Array.isArray(bData) ? bData : []);
+    setServices(Array.isArray(svData) ? svData : []);
+    setHours(Array.isArray(hData) ? hData : []);
+
 
     setLoading(false);
   }

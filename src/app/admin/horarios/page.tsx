@@ -50,7 +50,10 @@ export default function HorariosPage() {
     return null;
   }
 
-  async function loadProfileAndShop() {
+  async function loadProfileAndShop(): Promise<{
+    prof: Profile | null;
+    shopId: string | null;
+  }> {
     // 1) user
     const {
       data: { user },
@@ -60,7 +63,7 @@ export default function HorariosPage() {
     if (userErr) throw new Error(userErr.message);
     if (!user) {
       router.replace("/login");
-      return { prof: null as any, shopId: null as string | null };
+      return { prof: null, shopId: null };
     }
 
     // 2) profile
@@ -76,11 +79,15 @@ export default function HorariosPage() {
 
     // ✅ só admin de barbearia
     if (p.role !== "admin") {
-      throw new Error("Acesso negado: apenas administradores podem acessar esta página.");
+      throw new Error(
+        "Acesso negado: apenas administradores podem acessar esta página."
+      );
     }
 
     if (!p.barbershop_id) {
-      throw new Error("Você é admin da plataforma (barbershop_id = NULL). Esta tela é apenas para admin de uma barbearia.");
+      throw new Error(
+        "Você é admin da plataforma (barbershop_id = NULL). Esta tela é apenas para admin de uma barbearia."
+      );
     }
 
     return { prof: p, shopId: p.barbershop_id };
@@ -96,7 +103,7 @@ export default function HorariosPage() {
 
     if (error) throw new Error("Erro ao carregar horários: " + error.message);
 
-    setHours((data as any) || []);
+    setHours(Array.isArray(data) ? (data as WorkingHour[]) : []);
   }
 
   async function loadAll() {
@@ -109,9 +116,10 @@ export default function HorariosPage() {
       setBarbershopId(shopId);
 
       await loadHours(shopId);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      alert(e?.message || "Erro ao carregar dados.");
+      const msg = e instanceof Error ? e.message : "Erro ao carregar dados.";
+      alert(msg);
     } finally {
       setLoading(false);
     }

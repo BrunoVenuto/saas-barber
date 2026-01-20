@@ -12,8 +12,18 @@ type Appointment = {
   start_time: string;
   end_time: string;
   status: string;
-  barbers: { name: string };
-  services: { name: string };
+  barbers: { name: string | null } | null;
+  services: { name: string | null } | null;
+};
+
+type AppointmentDbRow = {
+  id: unknown;
+  date: unknown;
+  start_time: unknown;
+  end_time: unknown;
+  status: unknown;
+  barbers?: { name?: unknown } | null;
+  services?: { name?: unknown } | null;
 };
 
 export default function ClienteDashboard() {
@@ -24,6 +34,7 @@ export default function ClienteDashboard() {
 
   useEffect(() => {
     loadUpcoming();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadUpcoming() {
@@ -33,7 +44,11 @@ export default function ClienteDashboard() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) return;
+    if (!user) {
+      setAppointments([]);
+      setLoading(false);
+      return;
+    }
 
     const today = new Date().toISOString().split("T")[0];
 
@@ -56,8 +71,23 @@ export default function ClienteDashboard() {
       .order("date")
       .order("start_time");
 
-    if (data) setAppointments(data as any);
+    if (!Array.isArray(data)) {
+      setAppointments([]);
+      setLoading(false);
+      return;
+    }
 
+    const mapped: Appointment[] = (data as AppointmentDbRow[]).map((a) => ({
+      id: String(a.id),
+      date: String(a.date),
+      start_time: String(a.start_time),
+      end_time: String(a.end_time),
+      status: String(a.status),
+      barbers: a.barbers ? { name: (a.barbers.name as string | null) ?? null } : null,
+      services: a.services ? { name: (a.services.name as string | null) ?? null } : null,
+    }));
+
+    setAppointments(mapped);
     setLoading(false);
   }
 
@@ -87,12 +117,8 @@ export default function ClienteDashboard() {
                 <p className="text-xl font-bold text-orange-400">
                   {a.date} — {a.start_time}
                 </p>
-                <p className="text-white/70">
-                  Barbeiro: {a.barbers?.name}
-                </p>
-                <p className="text-white/70">
-                  Serviço: {a.services?.name}
-                </p>
+                <p className="text-white/70">Barbeiro: {a.barbers?.name ?? "-"}</p>
+                <p className="text-white/70">Serviço: {a.services?.name ?? "-"}</p>
               </div>
 
               <Badge variant="warning">Agendado</Badge>

@@ -9,8 +9,18 @@ type Appointment = {
   start_time: string;
   end_time: string;
   status: string;
-  profiles: { name: string };
-  services: { name: string };
+  profiles: { name: string | null } | null;
+  services: { name: string | null } | null;
+};
+
+type AppointmentDbRow = {
+  id: unknown;
+  date: unknown;
+  start_time: unknown;
+  end_time: unknown;
+  status: unknown;
+  profiles?: { name?: unknown } | null;
+  services?: { name?: unknown } | null;
 };
 
 export default function BarbeiroHistoricoPage() {
@@ -21,6 +31,7 @@ export default function BarbeiroHistoricoPage() {
 
   useEffect(() => {
     loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadHistory() {
@@ -70,10 +81,28 @@ export default function BarbeiroHistoricoPage() {
 
     if (error) {
       console.error("Erro ao buscar histórico:", error);
+      setAppointments([]);
+      setLoading(false);
+      return;
     }
 
-    if (data) setAppointments(data as any);
+    if (!Array.isArray(data)) {
+      setAppointments([]);
+      setLoading(false);
+      return;
+    }
 
+    const mapped: Appointment[] = (data as AppointmentDbRow[]).map((a) => ({
+      id: String(a.id),
+      date: String(a.date),
+      start_time: String(a.start_time),
+      end_time: String(a.end_time),
+      status: String(a.status),
+      profiles: a.profiles ? { name: (a.profiles.name as string | null) ?? null } : null,
+      services: a.services ? { name: (a.services.name as string | null) ?? null } : null,
+    }));
+
+    setAppointments(mapped);
     setLoading(false);
   }
 
@@ -101,17 +130,11 @@ export default function BarbeiroHistoricoPage() {
             <p className="font-bold text-primary">
               {a.date} — {a.start_time} às {a.end_time}
             </p>
-            <p>Cliente: {a.profiles?.name}</p>
-            <p>Serviço: {a.services?.name}</p>
+            <p>Cliente: {a.profiles?.name ?? "-"}</p>
+            <p>Serviço: {a.services?.name ?? "-"}</p>
             <p>
               Status:{" "}
-              <span
-                className={
-                  a.status === "done"
-                    ? "text-green-500"
-                    : "text-red-500"
-                }
-              >
+              <span className={a.status === "done" ? "text-green-500" : "text-red-500"}>
                 {statusLabel(a.status)}
               </span>
             </p>

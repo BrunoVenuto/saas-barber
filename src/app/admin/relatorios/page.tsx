@@ -145,7 +145,7 @@ export default function AdminRelatoriosPage() {
         return;
       }
 
-      setBarbers((data as Barber[]) || []);
+      setBarbers(Array.isArray(data) ? (data as Barber[]) : []);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barbershopId]);
@@ -183,7 +183,8 @@ export default function AdminRelatoriosPage() {
         return;
       }
 
-      const rows: AppointmentRow[] = ((data as any[]) || []).map((a) => ({
+      const raw = Array.isArray(data) ? data : [];
+      const rows: AppointmentRow[] = (raw as AppointmentRow[]).map((a) => ({
         id: a.id,
         date: a.date,
         status: normalizeStatus(a.status),
@@ -215,7 +216,8 @@ export default function AdminRelatoriosPage() {
       }
 
       const map: Record<string, ServiceMini> = {};
-      (sData as any[] | null)?.forEach((s) => {
+      const services = Array.isArray(sData) ? (sData as ServiceMini[]) : [];
+      services.forEach((s) => {
         map[s.id] = {
           id: s.id,
           name: s.name,
@@ -411,7 +413,7 @@ export default function AdminRelatoriosPage() {
 
                 {/* Legenda (melhor no mobile do que label no gráfico) */}
                 <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                  {chartData.map((d, i) => (
+                  {chartData.map((d) => (
                     <div
                       key={d.name}
                       className="rounded-xl bg-white/5 border border-white/10 px-3 py-2 flex items-center justify-between gap-2"

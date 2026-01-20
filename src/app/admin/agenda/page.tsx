@@ -169,22 +169,23 @@ export default function AdminAgendaPage() {
       return;
     }
 
-    const rows: AppointmentRow[] = (data as any[]) || [];
+    const rows: AppointmentRow[] = (data ?? []) as AppointmentRow[];
+
 
     // Buscar serviços (para nome/duração)
     const serviceIds = Array.from(
       new Set(rows.map((r) => r.service_id).filter(Boolean) as string[])
     );
 
-    let servicesMap = new Map<string, ServiceMini>();
+    const servicesMap = new Map<string, ServiceMini>();
     if (serviceIds.length > 0) {
       const { data: sData, error: sErr } = await supabase
         .from("services")
         .select("id,name,duration_minutes")
         .in("id", serviceIds);
 
-      if (!sErr && sData) {
-        (sData as any[]).forEach((s) => {
+      if (!sErr && Array.isArray(sData)) {
+        (sData as { id: string; name: string; duration_minutes: number | null }[]).forEach((s) => {
           servicesMap.set(s.id, {
             id: s.id,
             name: s.name,
@@ -192,6 +193,7 @@ export default function AdminAgendaPage() {
           });
         });
       }
+
     }
 
     // Map de barbeiros
@@ -407,17 +409,16 @@ Se precisar ajustar, responde aqui.`;
                       <span className="text-zinc-500">•</span>
 
                       <span
-                        className={`font-black ${
-                          ap.status === "confirmed"
+                        className={`font-black ${ap.status === "confirmed"
                             ? "text-green-400"
                             : ap.status === "pending" || ap.status === "scheduled"
-                            ? "text-yellow-300"
-                            : ap.status === "completed"
-                            ? "text-white"
-                            : ap.status === "canceled"
-                            ? "text-red-400"
-                            : "text-zinc-300"
-                        }`}
+                              ? "text-yellow-300"
+                              : ap.status === "completed"
+                                ? "text-white"
+                                : ap.status === "canceled"
+                                  ? "text-red-400"
+                                  : "text-zinc-300"
+                          }`}
                       >
                         {ap.status === "scheduled" ? "pending" : ap.status}
                       </span>

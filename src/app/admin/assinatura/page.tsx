@@ -148,7 +148,7 @@ export default function AdminAssinaturaPage() {
 
   const currentPlan: PlanKey = (shop?.plan as PlanKey) || "pro";
   const current = useMemo(() => planLimits(currentPlan), [currentPlan]);
-  const chosen = useMemo(() => planLimits(selected), [selected]);
+  
 
   async function savePlan(nextPlan: PlanKey) {
     if (!shop) return;
