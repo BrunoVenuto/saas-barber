@@ -26,13 +26,20 @@ type Appointment = {
   end_time: string;
 };
 
+type Barbershop = {
+  id: string;
+  name?: string;
+  slug: string;
+  is_active?: boolean;
+};
+
 export default function PublicBookingPage() {
   const supabase = createClient();
   const params = useParams();
 
   const slug = params.slug as string;
 
-  const [barbershop, setBarbershop] = useState<any>(null);
+  const [, setBarbershop] = useState<Barbershop | null>(null);
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [services, setServices] = useState<Service[]>([]);
 
@@ -59,25 +66,26 @@ export default function PublicBookingPage() {
 
       if (!shop) return;
 
-      setBarbershop(shop);
+      setBarbershop(shop as Barbershop);
 
       const { data: b } = await supabase
         .from("barbers")
         .select("id, name")
-        .eq("barbershop_id", shop.id)
+        .eq("barbershop_id", (shop as Barbershop).id)
         .order("name");
 
       const { data: s } = await supabase
         .from("services")
         .select("id, name, duration_minutes")
-        .eq("barbershop_id", shop.id)
+        .eq("barbershop_id", (shop as Barbershop).id)
         .order("name");
 
-      setBarbers(b || []);
-      setServices(s || []);
+      setBarbers(Array.isArray(b) ? (b as Barber[]) : []);
+      setServices(Array.isArray(s) ? (s as Service[]) : []);
     }
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // =========================
@@ -107,11 +115,12 @@ export default function PublicBookingPage() {
         .eq("date", date)
         .eq("status", "scheduled");
 
-      setWorkingHours(wh || []);
-      setAppointments(ap || []);
+      setWorkingHours(Array.isArray(wh) ? (wh as WorkingHour[]) : []);
+      setAppointments(Array.isArray(ap) ? (ap as Appointment[]) : []);
     }
 
     loadDay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBarber, date]);
 
   // =========================
@@ -171,7 +180,7 @@ export default function PublicBookingPage() {
     }
 
     return result;
-  }, [workingHours, appointments, selectedService]);
+  }, [workingHours, appointments, selectedService, services]);
 
   // =========================
   // SUBMIT
@@ -185,7 +194,10 @@ export default function PublicBookingPage() {
     setLoading(true);
 
     const service = services.find((s) => s.id === selectedService);
-    if (!service) return;
+    if (!service) {
+      setLoading(false);
+      return;
+    }
 
     const startMin = timeToMinutes(time);
     const endMin = startMin + service.duration_minutes;
@@ -218,9 +230,7 @@ export default function PublicBookingPage() {
   // =========================
   return (
     <div className="min-h-screen bg-black text-white p-8 max-w-4xl mx-auto space-y-6">
-      <h1 className="text-4xl font-black text-yellow-400">
-        Agende seu horário
-      </h1>
+      <h1 className="text-4xl font-black text-yellow-400">Agende seu horário</h1>
 
       {/* SELECTORS */}
       <div className="grid md:grid-cols-2 gap-4">
@@ -260,9 +270,7 @@ export default function PublicBookingPage() {
 
       {/* SLOTS */}
       <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
-        {slots.length === 0 && (
-          <p className="opacity-60">Nenhum horário disponível.</p>
-        )}
+        {slots.length === 0 && <p className="opacity-60">Nenhum horário disponível.</p>}
 
         {slots.map((t) => {
           const isSelected = t === time;

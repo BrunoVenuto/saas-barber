@@ -1,6 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
+// Tipagem compatível com o que o @supabase/ssr espera internamente (SerializeOptions)
+// Note: sameSite pode ser boolean no tipo do cookie.
+type SupabaseCookieOptions = Partial<{
+  path: string;
+  domain: string;
+  maxAge: number;
+  expires: Date;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: boolean | "lax" | "strict" | "none";
+}>;
+
+type SupabaseCookieToSet = {
+  name: string;
+  value: string;
+  options: SupabaseCookieOptions;
+};
+
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
 
@@ -9,14 +27,17 @@ export async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return req.cookies.get(name)?.value;
+        // @supabase/ssr espera uma lista de cookies do request
+        getAll() {
+          return req.cookies.getAll();
         },
-        set(name: string, value: string, options: any) {
-          res.cookies.set({ name, value, ...options });
-        },
-        remove(name: string, options: any) {
-          res.cookies.set({ name, value: "", ...options });
+
+        // @supabase/ssr envia uma lista de cookies para você aplicar no response
+        setAll(cookies: SupabaseCookieToSet[]) {
+          cookies.forEach(({ name, value, options }) => {
+            // forma mais compatível com Next: objeto com name/value e options espalhadas
+            res.cookies.set({ name, value, ...options });
+          });
         },
       },
     }
@@ -27,23 +48,10 @@ export async function middleware(req: NextRequest) {
 
   const pathname = req.nextUrl.pathname;
 
-  // rotas publicas
-  const isPublic =
-    pathname.startsWith("/agendar") ||
-    pathname.startsWith("/b") ||
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/signup") ||
-    pathname.startsWith("/");
-
-  // Obs: "/" é pública, mas vamos tratar melhor pelo matcher (abaixo)
-  // aqui não fazemos nada.
-
-  // Rotas protegidas
   const isAdminRoute = pathname.startsWith("/admin");
   const isSaasRoute = pathname.startsWith("/admin/saas");
   const isBarberRoute = pathname.startsWith("/barbeiro");
 
-  // Se for rota protegida e não logado -> login
   if ((isAdminRoute || isBarberRoute) && !user) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
@@ -51,12 +59,10 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Se não é protegido, segue
   if (!isAdminRoute && !isBarberRoute) {
     return res;
   }
 
-  // Buscar profile para decisões
   const { data: profile, error: profErr } = await supabase
     .from("profiles")
     .select("role, barbershop_id")
@@ -64,36 +70,27 @@ export async function middleware(req: NextRequest) {
     .single();
 
   if (profErr || !profile) {
-    // se não tiver profile, manda pro login (ou uma tela de erro)
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // ======================
-  // /admin/*
-  // ======================
   if (isAdminRoute) {
     if (profile.role !== "admin") {
-      // Se não é admin -> manda pro dashboard correto
       const url = req.nextUrl.clone();
       url.pathname = profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
       return NextResponse.redirect(url);
     }
 
-    // /admin/saas/* é apenas admin plataforma (barbershop_id null)
     if (isSaasRoute && profile.barbershop_id !== null) {
       const url = req.nextUrl.clone();
-      url.pathname = "/admin/agenda"; // admin de barbearia
+      url.pathname = "/admin/agenda";
       return NextResponse.redirect(url);
     }
 
     return res;
   }
 
-  // ======================
-  // /barbeiro/*
-  // ======================
   if (isBarberRoute) {
     if (profile.role !== "barber") {
       const url = req.nextUrl.clone();
@@ -107,9 +104,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    // só protege esses caminhos
-    "/admin/:path*",
-    "/barbeiro/:path*",
-  ],
+  matcher: ["/admin/:path*", "/barbeiro/:path*"],
 };

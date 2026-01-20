@@ -29,7 +29,7 @@ export default function AdminPlanosPage() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [, setProfile] = useState<Profile | null>(null);
   const [shop, setShop] = useState<Shop | null>(null);
 
   const selectedPlan = useMemo<PlanKey | null>(() => {

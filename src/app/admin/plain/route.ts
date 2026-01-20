@@ -12,10 +12,14 @@ export async function POST(req: Request) {
       error: uErr,
     } = await supabase.auth.getUser();
 
-    if (uErr) return NextResponse.json({ error: uErr.message }, { status: 401 });
-    if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    if (uErr) {
+      return NextResponse.json({ error: uErr.message }, { status: 401 });
+    }
+    if (!user) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
 
-    const body = await req.json().catch(() => null);
+    const body = (await req.json().catch(() => null)) as { plan?: unknown } | null;
     const plan = (body?.plan as PlanKey | undefined) || undefined;
 
     if (!plan || !["start", "pro", "premium"].includes(plan)) {
@@ -33,7 +37,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
     }
     if (!profile?.barbershop_id) {
-      return NextResponse.json({ error: "Usuário sem barbearia vinculada." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Usuário sem barbearia vinculada." },
+        { status: 400 }
+      );
     }
 
     const { error: upErr } = await supabase
@@ -46,7 +53,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Erro inesperado." }, { status: 500 });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Erro inesperado.";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

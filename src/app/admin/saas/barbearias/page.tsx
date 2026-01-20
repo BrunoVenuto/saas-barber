@@ -38,7 +38,7 @@ export default function SaaSBarbershopsPage() {
       return;
     }
 
-    setShops((data as any) || []);
+    setShops(Array.isArray(data) ? (data as Shop[]) : []);
     setLoading(false);
   }
 
@@ -75,7 +75,9 @@ export default function SaaSBarbershopsPage() {
     }
 
     setMsg(
-      `✅ Barbearia criada: ${json.shop.name} (slug: ${json.shop.slug}). Convite enviado para ${json.invited_admin_email || adminEmail}`
+      `✅ Barbearia criada: ${json.shop.name} (slug: ${json.shop.slug}). Convite enviado para ${
+        json.invited_admin_email || adminEmail
+      }`
     );
 
     setName("");
@@ -90,7 +92,9 @@ export default function SaaSBarbershopsPage() {
   async function handleDeactivate(shop: Shop) {
     setMsg(null);
 
-    const ok = confirm(`Desativar a barbearia "${shop.name}"?\n\nEla vai parar de aparecer publicamente.`);
+    const ok = confirm(
+      `Desativar a barbearia "${shop.name}"?\n\nEla vai parar de aparecer publicamente.`
+    );
     if (!ok) return;
 
     setLoading(true);
@@ -293,8 +297,8 @@ export default function SaaSBarbershopsPage() {
         </section>
 
         <div className="text-xs text-zinc-500">
-          * Recomendado: desativar primeiro. Excluir definitivo pode falhar se houver registros vinculados
-          (agendamentos, barbeiros, serviços, horários etc).
+          * Recomendado: desativar primeiro. Excluir definitivo pode falhar se houver registros
+          vinculados (agendamentos, barbeiros, serviços, horários etc).
         </div>
       </div>
     </div>

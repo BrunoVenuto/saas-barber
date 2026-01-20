@@ -8,16 +8,17 @@ type Appointment = {
   date: string;
   start_time: string;
   end_time: string;
-  status: string;
-  barber_id: string;
-  service: {
-    name: string;
-    price: number | null;
-  } | null;
-  client: {
-    name: string;
-    phone: string;
-  } | null;
+  status: string | null;
+  barber_id: string | null;
+  service: { name: string; price: number | null }[];
+  client: { name: string; phone: string | null }[];
+};
+
+type Profile = {
+  id: string;
+  role: string;
+  barbershop_id: string | null;
+  name: string | null;
 };
 
 export default function DashboardPage() {
@@ -26,7 +27,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [appointmentsToday, setAppointmentsToday] = useState<Appointment[]>([]);
   const [appointmentsMonth, setAppointmentsMonth] = useState<Appointment[]>([]);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
 
   const today = new Date().toISOString().slice(0, 10);
   const firstDayOfMonth = new Date(
@@ -46,18 +47,25 @@ export default function DashboardPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (!user) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
       // 2️⃣ Profile
       const { data: prof } = await supabase
         .from("profiles")
-        .select("*")
+        .select("id, role, barbershop_id, name")
         .eq("id", user.id)
         .single();
 
-      if (!prof) return;
+      if (!prof) {
+        setLoading(false);
+        return;
+      }
 
-      setProfile(prof);
+      const typedProf = prof as Profile;
+      setProfile(typedProf);
 
       // 3️⃣ Busca agendamentos de hoje
       let queryToday = supabase
@@ -75,17 +83,19 @@ export default function DashboardPage() {
         `
         )
         .eq("date", today)
-        .eq("barbershop_id", prof.barbershop_id)
+        .eq("barbershop_id", typedProf.barbershop_id)
         .order("start_time");
 
       // Se for barbeiro, filtra só os dele
-      if (prof.role === "barber") {
-        queryToday = queryToday.eq("barber_id", prof.id);
+      if (typedProf.role === "barber") {
+        queryToday = queryToday.eq("barber_id", typedProf.id);
       }
 
       const { data: todayData } = await queryToday;
 
-      setAppointmentsToday(todayData || []);
+      setAppointmentsToday(
+        Array.isArray(todayData) ? (todayData as Appointment[]) : []
+      );
 
       // 4️⃣ Busca agendamentos do mês
       let queryMonth = supabase
@@ -103,29 +113,32 @@ export default function DashboardPage() {
         `
         )
         .gte("date", firstDayOfMonth)
-        .eq("barbershop_id", prof.barbershop_id);
+        .eq("barbershop_id", typedProf.barbershop_id);
 
-      if (prof.role === "barber") {
-        queryMonth = queryMonth.eq("barber_id", prof.id);
+      if (typedProf.role === "barber") {
+        queryMonth = queryMonth.eq("barber_id", typedProf.id);
       }
 
       const { data: monthData } = await queryMonth;
 
-      setAppointmentsMonth(monthData || []);
+      setAppointmentsMonth(
+        Array.isArray(monthData) ? (monthData as Appointment[]) : []
+      );
 
       setLoading(false);
     }
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const totalToday = appointmentsToday.reduce(
-    (sum, a) => sum + (a.service?.price || 0),
+    (sum, a) => sum + (a.service?.[0]?.price || 0),
     0
   );
 
   const totalMonth = appointmentsMonth.reduce(
-    (sum, a) => sum + (a.service?.price || 0),
+    (sum, a) => sum + (a.service?.[0]?.price || 0),
     0
   );
 
@@ -139,7 +152,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-4xl font-black text-yellow-400">📊 Dashboard</h1>
         <p className="text-zinc-400">
-          Bem-vindo, {profile?.name} ({profile?.role})
+          Bem-vindo, {profile?.name ?? "—"} ({profile?.role ?? "—"})
         </p>
       </div>
 
@@ -184,16 +197,17 @@ export default function DashboardPage() {
           >
             <div>
               <p className="font-bold text-yellow-400">
-                {a.start_time.slice(0, 5)} - {a.service?.name}
+                {a.start_time.slice(0, 5)} - {a.service?.[0]?.name ?? "—"}
               </p>
               <p className="text-zinc-400 text-sm">
-                Cliente: {a.client?.name} • {a.client?.phone}
+                Cliente: {a.client?.[0]?.name ?? "—"} •{" "}
+                {a.client?.[0]?.phone ?? "—"}
               </p>
             </div>
 
             <div className="text-right">
               <p className="font-bold">
-                R$ {(a.service?.price || 0).toFixed(2)}
+                R$ {(a.service?.[0]?.price || 0).toFixed(2)}
               </p>
             </div>
           </div>

@@ -172,11 +172,16 @@ export async function POST(req: Request) {
       shop,
       invited_admin_email: adminEmail,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error("[SAAS_CREATE] unhandled error:", e);
+
+    const message =
+      e instanceof Error ? e.message : "Erro inesperado.";
+
     return NextResponse.json(
-      { error: e?.message || "Erro inesperado.", step: "catch" },
+      { error: message, step: "catch" },
       { status: 500 }
     );
   }
+
 }

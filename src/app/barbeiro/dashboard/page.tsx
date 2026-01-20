@@ -156,17 +156,31 @@ export default function BarberDashboardPage() {
       return;
     }
 
-    const mapped: Appointment[] = (res.data || []).map((a: any) => ({
+    type AppointmentRowDb = {
+      id: string;
+      date: string;
+      start_time: string;
+      end_time: string;
+      status: string | null;
+      client_name?: string | null;
+      client_phone?: string | null;
+      services?: { name?: string | null } | null;
+    };
+
+    const rows = Array.isArray(res.data) ? (res.data as AppointmentRowDb[]) : [];
+
+    const mapped: Appointment[] = rows.map((a) => ({
       id: a.id,
       date: a.date,
       start_time: a.start_time,
       end_time: a.end_time,
       // normaliza status antigo scheduled -> pending
-      status: a.status === "scheduled" ? "pending" : a.status,
+      status: a.status === "scheduled" ? "pending" : (a.status ?? "pending"),
       client_name: a.client_name ?? null,
       client_phone: a.client_phone ?? null,
       service_name: a.services?.name ?? null,
     }));
+
 
     setAppointments(mapped);
     setLoading(false);
@@ -260,14 +274,14 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     if (mins < CANCEL_MINUTES_NOTICE) {
       alert(
         `Cancelamento permitido somente com antecedência mínima de ${CANCEL_MINUTES_NOTICE} minutos.\n` +
-          `Faltam ${Math.max(mins, 0)} minutos para o horário.`
+        `Faltam ${Math.max(mins, 0)} minutos para o horário.`
       );
       return;
     }
 
     const ok = confirm(
       `Cancelar este agendamento?\n\n` +
-        `⚠️ Isso vai avisar o cliente no WhatsApp e marcar como canceled no sistema.`
+      `⚠️ Isso vai avisar o cliente no WhatsApp e marcar como canceled no sistema.`
     );
     if (!ok) return;
 
@@ -414,15 +428,14 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
                         <span className="text-zinc-500">•</span>
 
                         <span
-                          className={`font-bold ${
-                            ap.status === "confirmed"
+                          className={`font-bold ${ap.status === "confirmed"
                               ? "text-green-400"
                               : ap.status === "pending"
-                              ? "text-yellow-300"
-                              : ap.status === "canceled"
-                              ? "text-red-400"
-                              : "text-zinc-300"
-                          }`}
+                                ? "text-yellow-300"
+                                : ap.status === "canceled"
+                                  ? "text-red-400"
+                                  : "text-zinc-300"
+                            }`}
                         >
                           {ap.status === "scheduled" ? "pending" : ap.status}
                         </span>
