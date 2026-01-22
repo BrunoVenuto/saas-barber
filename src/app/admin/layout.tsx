@@ -1,38 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
-type NavItem = {
-  href: string;
-  label: string;
-};
-
-const NAV: NavItem[] = [
-  { href: "/admin/dashboard", label: "📊 Dashboard" },
-
-  // ✅ novo: Barbearias (admin da plataforma)
-  { href: "/admin/saas/barbearias", label: "🏪 Barbearias" },
-
-  { href: "/admin/servicos", label: "✂️ Serviços" },
-  { href: "/admin/barbeiros", label: "💈 Barbeiros" },   // ✅ AQUI
-  { href: "/admin/relatorios", label: "📈 Relatórios" },
-  { href: "/admin/planos", label: "💳 Planos" },
-  { href: "/admin/minha-barbearia", label: "🏪 Minha Barbearia" },
-];
+type NavItem = { href: string; label: string };
 
 function cx(...arr: Array<string | false | null | undefined>) {
   return arr.filter(Boolean).join(" ");
 }
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLinks({
+  items,
+  onNavigate,
+}: {
+  items: NavItem[];
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
 
   return (
     <nav className="flex flex-col gap-1">
-      {NAV.map((item) => {
+      {items.map((item) => {
         const active = pathname?.startsWith(item.href);
 
         return (
@@ -61,21 +51,34 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
  * - e barbershops.onboarded_at estiver NULL
  * => redireciona para /admin/onboarding
  *
+ * ✅ MAS: durante onboarding, libera rotas necessárias (serviços, barbeiros, etc)
  * Admin plataforma (barbershop_id NULL) NÃO passa pelo onboarding.
  */
 function useOnboardingGuard() {
   const supabase = createClient();
   const router = useRouter();
   const pathname = usePathname();
+
   const [checking, setChecking] = useState(true);
+  const [profile, setProfile] = useState<{ role: string; barbershop_id: string | null } | null>(
+    null
+  );
+
+  // rotas permitidas enquanto onboarded_at ainda é null
+  const onboardingAllowedPrefixes = useMemo(
+    () => [
+      "/admin/onboarding",
+      "/admin/servicos",
+      "/admin/barbeiros",
+      "/admin/horarios",
+      "/admin/minha-barbearia",
+    ],
+    []
+  );
 
   useEffect(() => {
     (async () => {
-      // não trava a própria página do onboarding
-      if (pathname?.startsWith("/admin/onboarding")) {
-        setChecking(false);
-        return;
-      }
+      setChecking(true);
 
       const {
         data: { user },
@@ -103,7 +106,9 @@ function useOnboardingGuard() {
         return;
       }
 
-      // admin plataforma: não precisa onboarding
+      setProfile(prof);
+
+      // ✅ admin plataforma: não faz onboarding
       if (prof.role !== "admin" || !prof.barbershop_id) {
         setChecking(false);
         return;
@@ -111,7 +116,7 @@ function useOnboardingGuard() {
 
       const { data: shop, error: shopErr } = await supabase
         .from("barbershops")
-        .select("onboarded_at, onboarding_step")
+        .select("onboarded_at")
         .eq("id", prof.barbershop_id)
         .single();
 
@@ -120,21 +125,46 @@ function useOnboardingGuard() {
         return;
       }
 
+      // ✅ se ainda não onboardou, só bloqueia fora da allowlist
       if (!shop?.onboarded_at) {
-        router.replace("/admin/onboarding");
-        return;
+        const allowed = onboardingAllowedPrefixes.some((p) => pathname?.startsWith(p));
+        if (!allowed) {
+          router.replace("/admin/onboarding");
+          return;
+        }
       }
 
       setChecking(false);
     })();
-  }, [pathname, router, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
-  return checking;
+  return { checking, profile };
 }
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const checking = useOnboardingGuard();
+  const { checking, profile } = useOnboardingGuard();
+
+  const navItems: NavItem[] = useMemo(() => {
+    const base: NavItem[] = [{ href: "/admin/dashboard", label: "📊 Dashboard" }];
+
+    // ✅ só admin plataforma (barbershop_id null) vê "Barbearias"
+    if (profile?.role === "admin" && profile?.barbershop_id === null) {
+      base.push({ href: "/admin/saas/barbearias", label: "🏪 Barbearias" });
+    }
+
+    // admin da barbearia
+    base.push(
+      { href: "/admin/servicos", label: "✂️ Serviços" },
+      { href: "/admin/barbeiros", label: "💈 Barbeiros" },
+      { href: "/admin/relatorios", label: "📈 Relatórios" },
+      { href: "/admin/planos", label: "💳 Planos" },
+      { href: "/admin/minha-barbearia", label: "🏪 Minha Barbearia" }
+    );
+
+    return base;
+  }, [profile]);
 
   // trava scroll do body quando drawer abre (mobile)
   useEffect(() => {
@@ -174,7 +204,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             className="h-11 w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition grid place-items-center"
             aria-label="Abrir menu"
           >
-            {/* ícone hamburguer */}
             <span className="block w-5">
               <span className="block h-0.5 bg-white/80 rounded mb-1.5" />
               <span className="block h-0.5 bg-white/80 rounded mb-1.5" />
@@ -184,9 +213,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
           <div className="min-w-0">
             <p className="font-black tracking-tight truncate">Admin</p>
-            <p className="text-[11px] text-white/60 -mt-0.5 truncate">
-              Barber Premium
-            </p>
+            <p className="text-[11px] text-white/60 -mt-0.5 truncate">Barber Premium</p>
           </div>
 
           <div className="h-11 w-11 rounded-xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center">
@@ -213,9 +240,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 </div>
                 <div className="min-w-0">
                   <p className="font-black tracking-tight truncate">Admin</p>
-                  <p className="text-[11px] text-white/60 -mt-0.5 truncate">
-                    Menu
-                  </p>
+                  <p className="text-[11px] text-white/60 -mt-0.5 truncate">Menu</p>
                 </div>
               </div>
 
@@ -230,7 +255,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="mt-5">
-              <NavLinks onNavigate={() => setOpen(false)} />
+              <NavLinks items={navItems} onNavigate={() => setOpen(false)} />
             </div>
           </aside>
         </div>
@@ -249,7 +274,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <NavLinks />
+          <NavLinks items={navItems} />
         </aside>
 
         {/* CONTENT */}
