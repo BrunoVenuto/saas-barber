@@ -116,6 +116,31 @@ export default function SaaSBarbershopsPage() {
     setLoading(false);
   }
 
+  async function handleReactivate(shop: Shop) {
+    setMsg(null);
+
+    const ok = confirm(`Reativar a barbearia "${shop.name}"?`);
+    if (!ok) return;
+
+    setLoading(true);
+
+    const res = await fetch(`/api/saas/barbershops/${shop.id}/reactivate`, {
+      method: "POST",
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setMsg(json?.error || "Falha ao reativar.");
+      setLoading(false);
+      return;
+    }
+
+    setMsg(`✅ Barbearia reativada: ${shop.name}`);
+    await load();
+    setLoading(false);
+  }
+
   async function handleDelete(shop: Shop) {
     setMsg(null);
 
@@ -281,6 +306,15 @@ export default function SaaSBarbershopsPage() {
                     title={!s.is_active ? "Já está desativada" : "Desativar barbearia"}
                   >
                     Desativar
+                  </button>
+
+                  <button
+                    className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 transition font-black"
+                    disabled={loading || s.is_active}
+                    onClick={() => handleReactivate(s)}
+                    title={s.is_active ? "Já está ativa" : "Reativar barbearia"}
+                  >
+                    Reativar
                   </button>
 
                   <button

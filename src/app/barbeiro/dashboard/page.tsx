@@ -13,7 +13,8 @@ type Appointment = {
   date: string; // yyyy-mm-dd
   start_time: string; // HH:mm:ss or HH:mm
   end_time: string; // HH:mm:ss or HH:mm
-  status: "pending" | "confirmed" | "canceled" | string;
+  // ✅ status final "done" (concluído) conforme constraint do banco
+  status: "pending" | "confirmed" | "canceled" | "done" | string;
   client_name?: string | null;
   client_phone?: string | null;
   service_name?: string | null;
@@ -67,6 +68,15 @@ function minutesUntil(ap: Appointment) {
   return Math.floor((start.getTime() - now.getTime()) / 60000);
 }
 
+function statusLabel(s: string) {
+  if (s === "pending") return "pendente";
+  if (s === "confirmed") return "confirmado";
+  if (s === "canceled") return "cancelado";
+  if (s === "done") return "concluído";
+  if (s === "scheduled") return "pendente";
+  return s;
+}
+
 export default function BarberDashboardPage() {
   const supabase = createClient();
 
@@ -75,12 +85,13 @@ export default function BarberDashboardPage() {
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(false);
+
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   // --------------------------
   // Load barber linked to user
-  // ✅ CORRIGIDO: usa barbers.user_id
+  // ✅ Alinhado com API: usa barbers.profile_id (profile.id === user.id)
   // --------------------------
   useEffect(() => {
     (async () => {
@@ -104,7 +115,7 @@ export default function BarberDashboardPage() {
       const b = await supabase
         .from("barbers")
         .select("id, name")
-        .eq("user_id", user.id)
+        .eq("profile_id", user.id)
         .maybeSingle();
 
       if (b.error) {
@@ -114,7 +125,7 @@ export default function BarberDashboardPage() {
 
       if (!b.data) {
         setStatusMsg(
-          "Não encontrei o barbeiro vinculado a esse login. Verifique se barbers.user_id está preenchido."
+          "Não encontrei o barbeiro vinculado a esse login. Verifique se barbers.profile_id está preenchido."
         );
         return;
       }
@@ -125,7 +136,7 @@ export default function BarberDashboardPage() {
   }, []);
 
   // --------------------------
-  // Load appointments
+  // Load appointments (dia)
   // --------------------------
   async function loadAppointments(selectedDay: string, barberId: string) {
     setLoading(true);
@@ -169,18 +180,18 @@ export default function BarberDashboardPage() {
 
     const rows = Array.isArray(res.data) ? (res.data as AppointmentRowDb[]) : [];
 
+    // ✅ scheduled -> pending
+    // ✅ done permanece done
     const mapped: Appointment[] = rows.map((a) => ({
       id: a.id,
       date: a.date,
       start_time: a.start_time,
       end_time: a.end_time,
-      // normaliza status antigo scheduled -> pending
       status: a.status === "scheduled" ? "pending" : (a.status ?? "pending"),
       client_name: a.client_name ?? null,
       client_phone: a.client_phone ?? null,
       service_name: a.services?.name ?? null,
     }));
-
 
     setAppointments(mapped);
     setLoading(false);
@@ -210,7 +221,10 @@ Confirmando seu agendamento:
 
 Está tudo certo?`;
 
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    window.open(
+      `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,
+      "_blank"
+    );
     return true;
   }
 
@@ -230,7 +244,10 @@ Está tudo certo?`;
 
 Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
 
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    window.open(
+      `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,
+      "_blank"
+    );
     return true;
   }
 
@@ -243,10 +260,8 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    // 1) abre WhatsApp primeiro
     openWhatsAppConfirm(ap);
 
-    // 2) confirma no banco via API
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/confirm`, {
       method: "POST",
     });
@@ -269,29 +284,25 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
   async function cancelAppointment(ap: Appointment) {
     if (!barber) return;
 
-    // regra de antecedência
     const mins = minutesUntil(ap);
     if (mins < CANCEL_MINUTES_NOTICE) {
       alert(
         `Cancelamento permitido somente com antecedência mínima de ${CANCEL_MINUTES_NOTICE} minutos.\n` +
-        `Faltam ${Math.max(mins, 0)} minutos para o horário.`
+          `Faltam ${Math.max(mins, 0)} minutos para o horário.`
       );
       return;
     }
 
     const ok = confirm(
-      `Cancelar este agendamento?\n\n` +
-      `⚠️ Isso vai avisar o cliente no WhatsApp e marcar como canceled no sistema.`
+      `Cancelar este agendamento?\n\n⚠️ Isso vai avisar o cliente no WhatsApp e marcar como canceled no sistema.`
     );
     if (!ok) return;
 
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    // 1) avisa WhatsApp
     openWhatsAppCancel(ap);
 
-    // 2) cancela via API
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/cancel`, {
       method: "POST",
     });
@@ -311,71 +322,116 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     setUpdatingId(null);
   }
 
+  async function completeAppointment(ap: Appointment) {
+    if (!barber) return;
+
+    const ok = confirm(
+      `Marcar como CONCLUÍDO?\n\n${hhmm(ap.start_time)} • ${
+        ap.client_name || "Cliente"
+      }`
+    );
+    if (!ok) return;
+
+    setUpdatingId(ap.id);
+    setStatusMsg(null);
+
+    const res = await fetch(`/api/barbeiro/appointments/${ap.id}/complete`, {
+      method: "POST",
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setStatusMsg("Erro ao concluir: " + (json?.error || "Falha na API"));
+      setUpdatingId(null);
+      return;
+    }
+
+    // ✅ no banco é "done"
+    setAppointments((prev) =>
+      prev.map((a) => (a.id === ap.id ? { ...a, status: "done" } : a))
+    );
+
+    setUpdatingId(null);
+  }
+
   // --------------------------
-  // Summary
+  // Summary (dia)
   // --------------------------
   const summary = useMemo(() => {
     const total = appointments.length;
     const confirmed = appointments.filter((a) => a.status === "confirmed").length;
     const pending = appointments.filter((a) => a.status === "pending").length;
     const canceled = appointments.filter((a) => a.status === "canceled").length;
+    const done = appointments.filter((a) => a.status === "done").length;
 
-    return { total, confirmed, pending, canceled };
+    return { total, confirmed, pending, canceled, done };
   }, [appointments]);
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-10">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl md:text-5xl font-black">
-              Minha <span className="text-yellow-400">agenda</span>
-            </h1>
-            <p className="text-zinc-400 mt-2">
-              Barbeiro:{" "}
-              <span className="text-white font-semibold">
-                {barber?.name || "carregando..."}
-              </span>
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
-              <label className="block text-sm text-zinc-400 mb-2">Dia</label>
-              <input
-                type="date"
-                value={day}
-                onChange={(e) => setDay(e.target.value)}
-                className="bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-              />
+    <div className="min-h-screen bg-black text-white">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6">
+        {/* TOP CONTROLS */}
+        <section className="bg-zinc-950 border border-white/10 rounded-2xl p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-xl sm:text-2xl font-black">📅 Agenda do dia</h2>
+              <p className="text-zinc-400 text-sm sm:text-base mt-1">
+                Barbeiro:{" "}
+                <span className="text-white font-semibold">
+                  {barber?.name || "carregando..."}
+                </span>
+              </p>
             </div>
 
-            <button
-              onClick={() => barber && loadAppointments(day, barber.id)}
-              className="h-[78px] px-5 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition"
-            >
-              Atualizar
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+              <div className="w-full sm:w-auto">
+                <label className="block text-sm text-zinc-400 mb-2">Dia</label>
+                <input
+                  type="date"
+                  value={day}
+                  onChange={(e) => setDay(e.target.value)}
+                  className="w-full sm:w-[220px] bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
+                />
+              </div>
+
+              <button
+                onClick={() => barber && loadAppointments(day, barber.id)}
+                className="h-12 sm:h-[44px] sm:self-end px-5 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition"
+              >
+                Atualizar
+              </button>
+            </div>
           </div>
-        </header>
+        </section>
 
         {/* SUMMARY */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <section className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Total</p>
             <p className="text-2xl font-black">{summary.total}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Pendentes</p>
-            <p className="text-2xl font-black text-yellow-300">{summary.pending}</p>
+            <p className="text-2xl font-black text-yellow-300">
+              {summary.pending}
+            </p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Confirmados</p>
-            <p className="text-2xl font-black text-green-400">{summary.confirmed}</p>
+            <p className="text-2xl font-black text-green-400">
+              {summary.confirmed}
+            </p>
+          </div>
+          <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
+            <p className="text-zinc-400 text-sm">Concluídos</p>
+            <p className="text-2xl font-black text-emerald-300">{summary.done}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Cancelados</p>
-            <p className="text-2xl font-black text-red-400">{summary.canceled}</p>
+            <p className="text-2xl font-black text-red-400">
+              {summary.canceled}
+            </p>
           </div>
         </section>
 
@@ -390,7 +446,8 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
         <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
           <div className="p-4 md:p-6 border-b border-white/10 flex items-center justify-between">
             <h2 className="text-xl font-black">
-              Agendamentos do dia <span className="text-yellow-400">{day}</span>
+              Agendamentos do dia{" "}
+              <span className="text-yellow-400">{day}</span>
             </h2>
             {loading && <span className="text-zinc-400">Carregando...</span>}
           </div>
@@ -402,8 +459,13 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
 
             {appointments.map((ap) => {
               const mins = minutesUntil(ap);
+
               const canCancel =
-                mins >= CANCEL_MINUTES_NOTICE && ap.status !== "canceled";
+                mins >= CANCEL_MINUTES_NOTICE &&
+                ap.status !== "canceled" &&
+                ap.status !== "done";
+
+              const canComplete = ap.status !== "canceled" && ap.status !== "done";
 
               return (
                 <div
@@ -412,7 +474,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
                 >
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <span className="inline-flex items-center justify-center px-3 py-1 rounded-lg bg-green-700/20 border border-green-500/20 text-green-300 font-bold">
                           {hhmm(ap.start_time)} - {hhmm(ap.end_time)}
                         </span>
@@ -428,20 +490,23 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
                         <span className="text-zinc-500">•</span>
 
                         <span
-                          className={`font-bold ${ap.status === "confirmed"
+                          className={`font-bold ${
+                            ap.status === "confirmed"
                               ? "text-green-400"
                               : ap.status === "pending"
-                                ? "text-yellow-300"
-                                : ap.status === "canceled"
-                                  ? "text-red-400"
-                                  : "text-zinc-300"
-                            }`}
+                              ? "text-yellow-300"
+                              : ap.status === "done"
+                              ? "text-emerald-300"
+                              : ap.status === "canceled"
+                              ? "text-red-400"
+                              : "text-zinc-300"
+                          }`}
                         >
-                          {ap.status === "scheduled" ? "pending" : ap.status}
+                          {statusLabel(ap.status)}
                         </span>
 
-                        {ap.status !== "canceled" && (
-                          <span className="text-xs text-zinc-500 ml-2">
+                        {ap.status !== "canceled" && ap.status !== "done" && (
+                          <span className="text-xs text-zinc-500">
                             {mins >= 0 ? `Faltam ${mins} min` : `Já passou`}
                           </span>
                         )}
@@ -458,20 +523,29 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
                         </span>
                       </div>
 
-                      {!canCancel && ap.status !== "canceled" && (
+                      {!canCancel && ap.status !== "canceled" && ap.status !== "done" && (
                         <div className="text-xs text-amber-300 mt-1">
-                          ⚠️ Cancelamento só com {CANCEL_MINUTES_NOTICE} min de antecedência.
+                          ⚠️ Cancelamento só com {CANCEL_MINUTES_NOTICE} min de
+                          antecedência.
                         </div>
                       )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
                       <button
-                        disabled={updatingId === ap.id || ap.status === "confirmed"}
+                        disabled={updatingId === ap.id || ap.status === "confirmed" || ap.status === "done"}
                         onClick={() => confirmAppointment(ap)}
                         className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-black transition disabled:opacity-50"
                       >
                         ✅ Confirmar
+                      </button>
+
+                      <button
+                        disabled={updatingId === ap.id || !canComplete}
+                        onClick={() => completeAppointment(ap)}
+                        className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"
+                      >
+                        ✅ Concluir
                       </button>
 
                       <button
