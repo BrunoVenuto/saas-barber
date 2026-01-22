@@ -1,7 +1,3 @@
-// ✅ ARQUIVO: (o mesmo que você já está usando para criar barbearia + convidar admin)
-// Ex: src/app/api/admin/saas/barbearias/create/route.ts
-// (mantenha o mesmo caminho que você já tinha — é ESSE endpoint que chama inviteUserByEmail)
-
 import { NextResponse } from "next/server";
 import { createClient as createAuthedClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
@@ -14,10 +10,6 @@ function slugify(input: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
     .slice(0, 60);
-}
-
-function cleanAppUrl(url: string) {
-  return url.replace(/\/+$/, ""); // remove trailing "/"
 }
 
 export async function POST(req: Request) {
@@ -67,14 +59,13 @@ export async function POST(req: Request) {
     const adminName: string | undefined = body?.adminName?.trim();
 
     if (!name) return NextResponse.json({ error: "Informe o nome.", step: "body" }, { status: 400 });
-    if (!adminEmail) {
+    if (!adminEmail)
       return NextResponse.json({ error: "Informe o email do admin.", step: "body" }, { status: 400 });
-    }
 
     const slug = slugRaw ? slugify(slugRaw) : slugify(name);
     if (!slug) return NextResponse.json({ error: "Slug inválido.", step: "slug" }, { status: 400 });
 
-    // 3) service client (service role)
+    // 3) service client
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -93,7 +84,7 @@ export async function POST(req: Request) {
       auth: { persistSession: false },
     });
 
-    // 4) evitar slug duplicado (retorna 409 melhor)
+    // 4) evitar slug duplicado
     const { data: existing, error: existsErr } = await adminSupabase
       .from("barbershops")
       .select("id")
@@ -124,13 +115,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: shopErr.message, step: "shop_insert" }, { status: 400 });
     }
 
-    // ✅ 6) convida admin (AQUI É O PULO DO GATO)
-    // O link do Supabase vem com #access_token no hash.
-    // Então o redirect deve ir pra /auth/callback (page.tsx) -> route.ts -> /update-password
-    const appUrlRaw = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const appUrl = cleanAppUrl(appUrlRaw);
+    // ✅✅✅ 6) convida admin - redirectTo TEM QUE IR PRA /callback
+    // porque o link vem com #access_token e quem cria sessão é o callback/page.tsx
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+    if (!appUrl) {
+      return NextResponse.json(
+        { error: "Env faltando: NEXT_PUBLIC_APP_URL (ex: https://seuapp.vercel.app)", step: "env_app_url" },
+        { status: 500 }
+      );
+    }
 
-    const redirectTo = `${appUrl}/auth/callback`;
+    const redirectTo = `${appUrl}/callback`;
 
     const { data: invited, error: inviteErr } = await adminSupabase.auth.admin.inviteUserByEmail(
       adminEmail,
@@ -184,7 +179,7 @@ export async function POST(req: Request) {
       ok: true,
       shop,
       invited_admin_email: adminEmail,
-      redirectTo_used: redirectTo,
+      redirectTo,
     });
   } catch (e: unknown) {
     console.error("[SAAS_CREATE] unhandled error:", e);
