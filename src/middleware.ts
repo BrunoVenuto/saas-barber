@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 // Tipagem compatível com o que o @supabase/ssr espera internamente (SerializeOptions)
-// Note: sameSite pode ser boolean no tipo do cookie.
 type SupabaseCookieOptions = Partial<{
   path: string;
   domain: string;
@@ -20,8 +19,7 @@ type SupabaseCookieToSet = {
 };
 
 export async function middleware(req: NextRequest) {
-  // Guardamos os cookies que o Supabase pedir para setar e aplicamos no response FINAL
-  // (NextResponse.next OU NextResponse.redirect). Isso evita loop de login por perder Set-Cookie no redirect.
+  // Guardamos cookies pendentes e aplicamos no response FINAL (next/redirect)
   const pendingCookies: SupabaseCookieToSet[] = [];
 
   const applyPendingCookies = (response: NextResponse) => {
@@ -36,11 +34,9 @@ export async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        // @supabase/ssr espera uma lista de cookies do request
         getAll() {
           return req.cookies.getAll();
         },
-        // @supabase/ssr envia uma lista de cookies para você aplicar no response
         setAll(cookies: SupabaseCookieToSet[]) {
           pendingCookies.push(...cookies);
         },
@@ -50,14 +46,30 @@ export async function middleware(req: NextRequest) {
 
   const pathname = req.nextUrl.pathname;
 
+  // Rotas
   const isAdminRoute = pathname.startsWith("/admin");
   const isSaasRoute = pathname.startsWith("/admin/saas");
   const isBarberRoute = pathname.startsWith("/barbeiro");
 
-  // Checa sessão/usuário
-  const { data, error: authErr } = await supabase.auth.getUser();
-  const user = data.user;
+  // ✅ ROTA DO CONVIDADO CRIAR SENHA
+  const isUpdatePasswordRoute = pathname === "/update-password";
 
+  // 1) Checa sessão/usuário (sempre que rota é protegida)
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  const user = authData.user;
+
+  // ✅ /update-password precisa APENAS estar logado (não exige role/profile)
+  if (isUpdatePasswordRoute) {
+    if (authErr || !user) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", pathname);
+      return applyPendingCookies(NextResponse.redirect(url));
+    }
+    return applyPendingCookies(NextResponse.next());
+  }
+
+  // 2) Protege /admin e /barbeiro
   if ((isAdminRoute || isBarberRoute) && (authErr || !user)) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
@@ -65,34 +77,37 @@ export async function middleware(req: NextRequest) {
     return applyPendingCookies(NextResponse.redirect(url));
   }
 
-  // Fora das rotas protegidas (por segurança; matcher já limita)
+  // Fora das rotas protegidas (matcher já limita, mas mantendo por segurança)
   if (!isAdminRoute && !isBarberRoute) {
     return applyPendingCookies(NextResponse.next());
   }
 
+  // 3) Pega profile (role/barbershop_id)
   const { data: profile, error: profErr } = await supabase
     .from("profiles")
     .select("role, barbershop_id")
     .eq("id", user!.id)
     .single();
 
+  // Se não tem profile ainda, manda pro login (ou você pode mandar pro /update-password)
   if (profErr || !profile) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     return applyPendingCookies(NextResponse.redirect(url));
   }
 
+  // 4) Regras de acesso por role
   if (isAdminRoute) {
     if (profile.role !== "admin") {
       const url = req.nextUrl.clone();
-      url.pathname =
-        profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
+      url.pathname = profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
       return applyPendingCookies(NextResponse.redirect(url));
     }
 
+    // ✅ se for admin de barbearia (barbershop_id != null) não pode ver /admin/saas
     if (isSaasRoute && profile.barbershop_id !== null) {
       const url = req.nextUrl.clone();
-      url.pathname = "/admin/agenda";
+      url.pathname = "/admin/dashboard";
       return applyPendingCookies(NextResponse.redirect(url));
     }
 
@@ -102,7 +117,7 @@ export async function middleware(req: NextRequest) {
   if (isBarberRoute) {
     if (profile.role !== "barber") {
       const url = req.nextUrl.clone();
-      url.pathname = "/admin/agenda";
+      url.pathname = "/admin/dashboard";
       return applyPendingCookies(NextResponse.redirect(url));
     }
     return applyPendingCookies(NextResponse.next());
@@ -112,5 +127,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/barbeiro/:path*"],
+  matcher: ["/admin/:path*", "/barbeiro/:path*", "/update-password"],
 };
