@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
@@ -34,16 +34,26 @@ export default function BarbeirosPage() {
 
   const isEditing = useMemo(() => !!editingId, [editingId]);
 
-  async function loadAll() {
+  const resetForm = useCallback(() => {
+    setEditingId(null);
+    setName("");
+    setPhone("");
+    setActive(true);
+  }, []);
+
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setMsg(null);
 
     const bsId = await getCurrentBarbershopIdBrowser();
     if (!bsId) {
       setMsg("Não foi possível identificar a barbearia do usuário logado (barbershop_id).");
+      setBarbers([]);
+      setBarbershopId(null);
       setLoading(false);
       return;
     }
+
     setBarbershopId(bsId);
 
     const { data, error } = await supabase
@@ -61,19 +71,11 @@ export default function BarbeirosPage() {
 
     setBarbers((data as Barber[]) || []);
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function resetForm() {
-    setEditingId(null);
-    setName("");
-    setPhone("");
-    setActive(true);
-  }
+  }, [loadAll]);
 
   function startEdit(b: Barber) {
     setEditingId(b.id);
@@ -102,7 +104,6 @@ export default function BarbeirosPage() {
     };
 
     if (!isEditing) {
-      // ✅ INSERT EM public.barbers
       const { error } = await supabase.from("barbers").insert(payload);
       if (error) {
         setMsg("Erro ao criar barbeiro: " + error.message);
@@ -116,7 +117,6 @@ export default function BarbeirosPage() {
       return;
     }
 
-    // ✅ UPDATE EM public.barbers
     const { error } = await supabase.from("barbers").update(payload).eq("id", editingId);
 
     if (error) {
@@ -137,7 +137,6 @@ export default function BarbeirosPage() {
     setSaving(true);
     setMsg(null);
 
-    // ✅ DELETE EM public.barbers
     const { error } = await supabase.from("barbers").delete().eq("id", id);
 
     if (error) {
@@ -162,12 +161,13 @@ export default function BarbeirosPage() {
         <div>
           <h1 className="text-3xl font-black text-yellow-400">Barbeiros</h1>
           <p className="text-zinc-400 mt-1">
-            Estes dados salvam em <span className="text-zinc-200 font-semibold">public.barbers</span>
+            Estes dados salvam em{" "}
+            <span className="text-zinc-200 font-semibold">public.barbers</span>
           </p>
         </div>
 
         <button
-          onClick={() => resetForm()}
+          onClick={resetForm}
           className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-black hover:opacity-90"
         >
           + Novo barbeiro

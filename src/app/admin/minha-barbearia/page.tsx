@@ -33,7 +33,6 @@ function normalizeInstagram(v: string) {
   return s.startsWith("@") ? s : `@${s}`;
 }
 
-// ✅ deixa o slug sempre limpo (sem acento, sem espaço)
 function slugify(input: string) {
   return (input || "")
     .toLowerCase()
@@ -64,7 +63,6 @@ export default function MinhaBarbeariaPage() {
   const [city, setCity] = useState("");
   const [instagram, setInstagram] = useState("");
 
-  // ✅ preview usa o slug salvo no banco (shop.slug), para não confundir antes de salvar
   const landingUrl = useMemo(() => {
     if (!shop?.slug) return null;
     return `/b/${shop.slug}`;
@@ -79,7 +77,6 @@ export default function MinhaBarbeariaPage() {
     setLoading(true);
     setMsg(null);
 
-    // 1) user
     const {
       data: { user },
       error: userErr,
@@ -96,7 +93,6 @@ export default function MinhaBarbeariaPage() {
       return;
     }
 
-    // 2) profile
     const { data: prof, error: profErr } = await supabase
       .from("profiles")
       .select("id, role, barbershop_id, name")
@@ -111,7 +107,6 @@ export default function MinhaBarbeariaPage() {
 
     setProfile(prof as Profile);
 
-    // ✅ somente admin de barbearia (barbershop_id NOT NULL)
     if (prof.role !== "admin") {
       setMsg("Acesso negado: apenas administradores podem acessar esta página.");
       setLoading(false);
@@ -126,7 +121,6 @@ export default function MinhaBarbeariaPage() {
       return;
     }
 
-    // 3) barbershop
     const { data: bs, error: bsErr } = await supabase
       .from("barbershops")
       .select("id,name,slug,phone,whatsapp,address,city,instagram")
@@ -144,7 +138,6 @@ export default function MinhaBarbeariaPage() {
     const s = bs as Barbershop;
     setShop(s);
 
-    // preencher form
     setName(s.name || "");
     setSlug(s.slug || "");
     setPhone(s.phone || "");
@@ -161,7 +154,6 @@ export default function MinhaBarbeariaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ se o usuário digitar nome e o slug estiver vazio, sugerimos automaticamente
   useEffect(() => {
     if (!shop) return;
     if (slug.trim()) return;
@@ -195,7 +187,6 @@ export default function MinhaBarbeariaPage() {
       instagram: instagram.trim() ? normalizeInstagram(instagram) : null,
     };
 
-    // ✅ dica: se der erro aqui, quase sempre é RLS/policy bloqueando UPDATE
     const { error } = await supabase
       .from("barbershops")
       .update(payload)
@@ -220,13 +211,9 @@ export default function MinhaBarbeariaPage() {
             <h1 className="text-3xl md:text-5xl font-black">
               Minha <span className="text-yellow-400">barbearia</span>
             </h1>
-
-            {/* ✅ agora mostra o NOME da barbearia (quando carregada) */}
             <p className="text-zinc-400 mt-2">
               Edite os dados que aparecem na landing{" "}
-              <span className="text-zinc-200 font-semibold">
-                {shop?.name ? shop.name : "/b/[slug]"}
-              </span>
+              <span className="text-zinc-200 font-semibold">/b/[slug]</span>
             </p>
           </div>
 
@@ -296,12 +283,14 @@ export default function MinhaBarbeariaPage() {
                 />
                 <p className="text-xs text-zinc-500 mt-1">
                   Usado em{" "}
-                  <span className="text-zinc-300 font-semibold">/b/{shop.slug}</span>{" "}
+                  <span className="text-zinc-300 font-semibold">
+                    /b/{shop.slug}
+                  </span>{" "}
                   e{" "}
                   <span className="text-zinc-300 font-semibold">
                     /agendar/{shop.slug}
                   </span>
-                  . (Após salvar, o slug muda lá também.)
+                  .
                 </p>
               </div>
 
@@ -324,7 +313,7 @@ export default function MinhaBarbeariaPage() {
                   placeholder="Ex: 31999999999"
                 />
                 <p className="text-xs text-zinc-500 mt-1">
-                  Salve só números (DDD + número). A landing monta o link wa.me/55...
+                  Salve só números (DDD + número).
                 </p>
               </div>
 
@@ -376,7 +365,17 @@ export default function MinhaBarbeariaPage() {
               </Link>
             </div>
 
-            {/* ✅ removido: debug com email/id/barbershop_id */}
+            {/* ✅ Agora profile está sendo usado, então nunca quebra build */}
+            <div className="pt-4 text-xs text-zinc-500">
+              Logado como:{" "}
+              <span className="text-zinc-300 font-semibold">
+                {profile?.name || profile?.id || "—"}
+              </span>{" "}
+              • barbershop_id:{" "}
+              <span className="text-zinc-300 font-semibold">
+                {profile?.barbershop_id || "—"}
+              </span>
+            </div>
           </section>
         )}
       </div>
