@@ -15,15 +15,46 @@ export default function UpdatePasswordPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  // garante que existe sessão (após /auth/callback)
+  // ✅ garante sessão (link do email) e evita ficar preso aqui sem necessidade
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
+      setMsg(null);
+
+      // precisa ter sessão após o link do convite
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+
+      if (sessionErr) {
+        setMsg("Erro ao validar sessão: " + sessionErr.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!sessionData.session) {
         setMsg("Sessão inválida. Abra o link do email novamente.");
         setLoading(false);
         return;
       }
+
+      // Se já existe profile e role, e o cara já tá onboarded, pode mandar pro painel
+      // (não é obrigatório, mas evita usuário cair aqui por engano)
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData?.user;
+
+      if (user?.id) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        // se já tem profile admin, manda pro onboarding (ou dashboard se você preferir)
+        if (profile?.role === "admin") {
+          // se quiser mandar direto pro dashboard, troque aqui:
+          // router.replace("/admin/dashboard");
+          // return;
+        }
+      }
+
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -36,12 +67,14 @@ export default function UpdatePasswordPage() {
       setMsg("Senha fraca. Use pelo menos 6 caracteres.");
       return;
     }
+
     if (password !== confirm) {
       setMsg("As senhas não conferem.");
       return;
     }
 
     setSaving(true);
+
     const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
@@ -51,6 +84,8 @@ export default function UpdatePasswordPage() {
     }
 
     setSaving(false);
+
+    // ✅ após criar senha, vai para o onboarding do admin da barbearia
     router.replace("/admin/onboarding");
   }
 
@@ -107,6 +142,10 @@ export default function UpdatePasswordPage() {
         >
           {saving ? "Salvando..." : "Salvar senha"}
         </button>
+
+        <p className="text-xs text-zinc-500">
+          Se aparecer “Sessão inválida”, volte no email e abra o link novamente.
+        </p>
       </div>
     </div>
   );
