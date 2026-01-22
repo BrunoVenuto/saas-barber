@@ -1,33 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
-
-type Profile = {
-  id: string;
-  role: string;
-  barbershop_id: string | null;
-  name: string | null;
-};
-
-type Barbershop = {
-  id: string;
-  name: string;
-};
 
 type NavItem = {
   href: string;
   label: string;
-  platformOnly?: boolean; // ✅ só admin plataforma
 };
 
 const NAV: NavItem[] = [
   { href: "/admin/dashboard", label: "📊 Dashboard" },
 
-  // ✅ Barbearias (apenas admin da plataforma)
-  { href: "/admin/saas/barbearias", label: "🏪 Barbearias", platformOnly: true },
+  // ✅ novo: Barbearias (admin da plataforma)
+  { href: "/admin/saas/barbearias", label: "🏪 Barbearias" },
 
   { href: "/admin/servicos", label: "✂️ Serviços" },
   { href: "/admin/relatorios", label: "📈 Relatórios" },
@@ -39,18 +26,12 @@ function cx(...arr: Array<string | false | null | undefined>) {
   return arr.filter(Boolean).join(" ");
 }
 
-function NavLinks({
-  onNavigate,
-  items,
-}: {
-  onNavigate?: () => void;
-  items: NavItem[];
-}) {
+function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
 
   return (
     <nav className="flex flex-col gap-1">
-      {items.map((item) => {
+      {NAV.map((item) => {
         const active = pathname?.startsWith(item.href);
 
         return (
@@ -73,15 +54,86 @@ function NavLinks({
   );
 }
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
+/**
+ * Guard:
+ * - Se for admin de barbearia (profiles.role=admin e barbershop_id NOT NULL)
+ * - e barbershops.onboarded_at estiver NULL
+ * => redireciona para /admin/onboarding
+ *
+ * Admin plataforma (barbershop_id NULL) NÃO passa pelo onboarding.
+ */
+function useOnboardingGuard() {
   const supabase = createClient();
   const router = useRouter();
+  const pathname = usePathname();
+  const [checking, setChecking] = useState(true);
 
+  useEffect(() => {
+    (async () => {
+      // não trava a própria página do onboarding
+      if (pathname?.startsWith("/admin/onboarding")) {
+        setChecking(false);
+        return;
+      }
+
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr) {
+        setChecking(false);
+        return;
+      }
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("role, barbershop_id")
+        .eq("id", user.id)
+        .single();
+
+      if (profErr || !prof) {
+        setChecking(false);
+        return;
+      }
+
+      // admin plataforma: não precisa onboarding
+      if (prof.role !== "admin" || !prof.barbershop_id) {
+        setChecking(false);
+        return;
+      }
+
+      const { data: shop, error: shopErr } = await supabase
+        .from("barbershops")
+        .select("onboarded_at, onboarding_step")
+        .eq("id", prof.barbershop_id)
+        .single();
+
+      if (shopErr) {
+        setChecking(false);
+        return;
+      }
+
+      if (!shop?.onboarded_at) {
+        router.replace("/admin/onboarding");
+        return;
+      }
+
+      setChecking(false);
+    })();
+  }, [pathname, router, supabase]);
+
+  return checking;
+}
+
+export default function AdminLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [shopName, setShopName] = useState<string>("");
+  const checking = useOnboardingGuard();
 
   // trava scroll do body quando drawer abre (mobile)
   useEffect(() => {
@@ -102,78 +154,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/login");
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
+        <div className="text-zinc-300">Carregando...</div>
+      </div>
+    );
   }
-
-  // ✅ carrega profile + nome da barbearia (se tiver)
-  useEffect(() => {
-    (async () => {
-      setLoadingProfile(true);
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setLoadingProfile(false);
-        router.replace("/login");
-        return;
-      }
-
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("id, role, barbershop_id, name")
-        .eq("id", user.id)
-        .single();
-
-      if (profErr || !prof) {
-        setProfile(null);
-        setShopName("");
-        setLoadingProfile(false);
-        return;
-      }
-
-      const p = prof as Profile;
-      setProfile(p);
-
-      // se for admin de barbearia, pega o nome da barbearia
-      if (p.barbershop_id) {
-        const { data: bs } = await supabase
-          .from("barbershops")
-          .select("id, name")
-          .eq("id", p.barbershop_id)
-          .single();
-
-        setShopName((bs as Barbershop | null)?.name || "");
-      } else {
-        setShopName(""); // admin plataforma
-      }
-
-      setLoadingProfile(false);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const isPlatformAdmin = !!profile && profile.role === "admin" && profile.barbershop_id === null;
-
-  const filteredNav = useMemo(() => {
-    // enquanto carrega, deixa o menu sem itens “sensíveis”
-    if (loadingProfile) {
-      return NAV.filter((x) => !x.platformOnly);
-    }
-    if (isPlatformAdmin) return NAV;
-    // admin de barbearia (ou qualquer outro) não vê “Barbearias”
-    return NAV.filter((x) => !x.platformOnly);
-  }, [loadingProfile, isPlatformAdmin]);
-
-  const headerTitle = "Admin";
-  const headerSubtitle = loadingProfile
-    ? "Carregando..."
-    : isPlatformAdmin
-    ? "Plataforma"
-    : shopName || "Minha barbearia";
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -186,6 +173,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             className="h-11 w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition grid place-items-center"
             aria-label="Abrir menu"
           >
+            {/* ícone hamburguer */}
             <span className="block w-5">
               <span className="block h-0.5 bg-white/80 rounded mb-1.5" />
               <span className="block h-0.5 bg-white/80 rounded mb-1.5" />
@@ -194,9 +182,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </button>
 
           <div className="min-w-0">
-            <p className="font-black tracking-tight truncate">{headerTitle}</p>
+            <p className="font-black tracking-tight truncate">Admin</p>
             <p className="text-[11px] text-white/60 -mt-0.5 truncate">
-              {headerSubtitle}
+              Barber Premium
             </p>
           </div>
 
@@ -216,16 +204,16 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             aria-label="Fechar menu"
           />
 
-          <aside className="absolute left-0 top-0 bottom-0 w-[84%] max-w-[320px] bg-zinc-950 border-r border-white/10 p-5 flex flex-col">
+          <aside className="absolute left-0 top-0 bottom-0 w-[84%] max-w-[320px] bg-zinc-950 border-r border-white/10 p-5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="h-11 w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center shrink-0">
                   <span className="text-yellow-200 font-black">BP</span>
                 </div>
                 <div className="min-w-0">
-                  <p className="font-black tracking-tight truncate">{headerTitle}</p>
+                  <p className="font-black tracking-tight truncate">Admin</p>
                   <p className="text-[11px] text-white/60 -mt-0.5 truncate">
-                    {headerSubtitle}
+                    Menu
                   </p>
                 </div>
               </div>
@@ -241,16 +229,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="mt-5">
-              <NavLinks onNavigate={() => setOpen(false)} items={filteredNav} />
-            </div>
-
-            <div className="mt-auto pt-5 border-t border-white/10">
-              <button
-                onClick={handleLogout}
-                className="w-full text-left px-4 py-2.5 rounded-xl border border-transparent hover:bg-red-500/10 hover:border-red-500/20 text-red-300 transition font-black"
-              >
-                🚪 Sair
-              </button>
+              <NavLinks onNavigate={() => setOpen(false)} />
             </div>
           </aside>
         </div>
@@ -258,29 +237,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
       <div className="md:flex">
         {/* DESKTOP SIDEBAR */}
-        <aside className="hidden md:flex w-72 shrink-0 p-6 bg-zinc-950 border-r border-white/10 flex-col">
+        <aside className="hidden md:block w-72 shrink-0 p-6 bg-zinc-950 border-r border-white/10">
           <div className="flex items-center gap-3 mb-6">
             <div className="h-11 w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center">
               <span className="text-yellow-200 font-black">BP</span>
             </div>
-            <div className="min-w-0">
-              <h2 className="text-lg font-black text-yellow-200">{headerTitle}</h2>
-              <p className="text-xs text-white/60 -mt-0.5 truncate">
-                {headerSubtitle}
-              </p>
+            <div>
+              <h2 className="text-lg font-black text-yellow-200">Admin</h2>
+              <p className="text-xs text-white/60 -mt-0.5">Barber Premium</p>
             </div>
           </div>
 
-          <NavLinks items={filteredNav} />
-
-          <div className="mt-auto pt-6 border-t border-white/10">
-            <button
-              onClick={handleLogout}
-              className="w-full text-left px-4 py-2.5 rounded-xl border border-transparent hover:bg-red-500/10 hover:border-red-500/20 text-red-300 transition font-black"
-            >
-              🚪 Sair
-            </button>
-          </div>
+          <NavLinks />
         </aside>
 
         {/* CONTENT */}
