@@ -12,6 +12,12 @@ function slugify(input: string) {
     .slice(0, 60);
 }
 
+function normalizeOrigin(appUrl: string) {
+  const s = (appUrl || "").trim();
+  if (!s) return "http://localhost:3000";
+  return s.endsWith("/") ? s.slice(0, -1) : s;
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = createAuthedClient();
@@ -20,10 +26,16 @@ export async function POST(req: Request) {
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     if (authErr) {
       console.error("[SAAS_CREATE] auth error:", authErr);
-      return NextResponse.json({ error: authErr.message, step: "auth" }, { status: 401 });
+      return NextResponse.json(
+        { error: authErr.message, step: "auth" },
+        { status: 401 }
+      );
     }
     if (!authData?.user) {
-      return NextResponse.json({ error: "Não autenticado.", step: "auth" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Não autenticado.", step: "auth" },
+        { status: 401 }
+      );
     }
 
     // 1) profile + permissão
@@ -35,11 +47,17 @@ export async function POST(req: Request) {
 
     if (profErr) {
       console.error("[SAAS_CREATE] profile error:", profErr);
-      return NextResponse.json({ error: profErr.message, step: "profile" }, { status: 404 });
+      return NextResponse.json(
+        { error: profErr.message, step: "profile" },
+        { status: 404 }
+      );
     }
 
     if (!profile) {
-      return NextResponse.json({ error: "Perfil não encontrado.", step: "profile" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Perfil não encontrado.", step: "profile" },
+        { status: 404 }
+      );
     }
 
     // ✅ precisa ser admin plataforma (role admin + barbershop_id null)
@@ -58,19 +76,35 @@ export async function POST(req: Request) {
     const adminEmail: string = body?.adminEmail?.trim();
     const adminName: string | undefined = body?.adminName?.trim();
 
-    if (!name) return NextResponse.json({ error: "Informe o nome.", step: "body" }, { status: 400 });
+    if (!name)
+      return NextResponse.json(
+        { error: "Informe o nome.", step: "body" },
+        { status: 400 }
+      );
+
     if (!adminEmail)
-      return NextResponse.json({ error: "Informe o email do admin.", step: "body" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Informe o email do admin.", step: "body" },
+        { status: 400 }
+      );
 
     const slug = slugRaw ? slugify(slugRaw) : slugify(name);
-    if (!slug) return NextResponse.json({ error: "Slug inválido.", step: "slug" }, { status: 400 });
+    if (!slug)
+      return NextResponse.json(
+        { error: "Slug inválido.", step: "slug" },
+        { status: 400 }
+      );
 
     // 3) service client
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!url || !serviceKey) {
-      console.error("[SAAS_CREATE] missing env", { url: !!url, serviceKey: !!serviceKey });
+      console.error("[SAAS_CREATE] missing env", {
+        url: !!url,
+        serviceKey: !!serviceKey,
+      });
+
       return NextResponse.json(
         {
           error: "Env faltando: NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY",
@@ -93,7 +127,10 @@ export async function POST(req: Request) {
 
     if (existsErr) {
       console.error("[SAAS_CREATE] slug check error:", existsErr);
-      return NextResponse.json({ error: existsErr.message, step: "slug_check" }, { status: 400 });
+      return NextResponse.json(
+        { error: existsErr.message, step: "slug_check" },
+        { status: 400 }
+      );
     }
 
     if (existing?.id) {
@@ -112,24 +149,30 @@ export async function POST(req: Request) {
 
     if (shopErr) {
       console.error("[SAAS_CREATE] shop insert error:", shopErr);
-      return NextResponse.json({ error: shopErr.message, step: "shop_insert" }, { status: 400 });
+      return NextResponse.json(
+        { error: shopErr.message, step: "shop_insert" },
+        { status: 400 }
+      );
     }
 
     // 6) convida admin
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const redirectTo = `${appUrl}/login`;
+    // ✅ IMPORTANTE:
+    // o invite precisa cair em /auth/callback para trocar o `code` por sessão.
+    // depois mandamos para /auth/update-password para o cliente definir a senha.
+    const appUrl = normalizeOrigin(
+      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+    );
+    const redirectTo = `${appUrl}/auth/callback?next=/auth/update-password`;
 
-    const { data: invited, error: inviteErr } = await adminSupabase.auth.admin.inviteUserByEmail(
-      adminEmail,
-      {
+    const { data: invited, error: inviteErr } =
+      await adminSupabase.auth.admin.inviteUserByEmail(adminEmail, {
         redirectTo,
         data: {
           role: "admin",
           barbershop_id: shop.id,
           name: adminName || null,
         },
-      }
-    );
+      });
 
     if (inviteErr) {
       console.error("[SAAS_CREATE] invite error:", inviteErr);
@@ -143,7 +186,10 @@ export async function POST(req: Request) {
     if (!invitedUserId) {
       console.error("[SAAS_CREATE] invited user id missing:", invited);
       return NextResponse.json(
-        { error: "Convite enviado, mas não consegui pegar o ID do usuário.", step: "invite" },
+        {
+          error: "Convite enviado, mas não consegui pegar o ID do usuário.",
+          step: "invite",
+        },
         { status: 400 }
       );
     }
@@ -162,7 +208,10 @@ export async function POST(req: Request) {
     if (upsertErr) {
       console.error("[SAAS_CREATE] profile upsert error:", upsertErr);
       return NextResponse.json(
-        { error: `Convite ok, mas falhou criar profile: ${upsertErr.message}`, step: "profile_upsert" },
+        {
+          error: `Convite ok, mas falhou criar profile: ${upsertErr.message}`,
+          step: "profile_upsert",
+        },
         { status: 400 }
       );
     }
@@ -171,17 +220,13 @@ export async function POST(req: Request) {
       ok: true,
       shop,
       invited_admin_email: adminEmail,
+      redirectTo_used: redirectTo,
     });
   } catch (e: unknown) {
     console.error("[SAAS_CREATE] unhandled error:", e);
 
-    const message =
-      e instanceof Error ? e.message : "Erro inesperado.";
+    const message = e instanceof Error ? e.message : "Erro inesperado.";
 
-    return NextResponse.json(
-      { error: message, step: "catch" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message, step: "catch" }, { status: 500 });
   }
-
 }
