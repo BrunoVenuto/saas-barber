@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
@@ -24,11 +24,12 @@ export default function ServicosPage() {
   const [price, setPrice] = useState("");
   const [duration, setDuration] = useState("");
 
-  async function loadServices() {
+  const loadServices = useCallback(async () => {
     setLoading(true);
 
     const barbershopId = await getCurrentBarbershopIdBrowser();
     if (!barbershopId) {
+      setServices([]);
       setLoading(false);
       return;
     }
@@ -41,16 +42,17 @@ export default function ServicosPage() {
 
     if (error) {
       alert("Erro ao buscar serviços: " + error.message);
+      setServices([]);
     } else {
-      setServices(data || []);
+      setServices((data as Service[]) || []);
     }
 
     setLoading(false);
-  }
+  }, [supabase]);
 
   useEffect(() => {
     loadServices();
-  }, []);
+  }, [loadServices]);
 
   function openNewModal() {
     setEditingService(null);
@@ -78,7 +80,7 @@ export default function ServicosPage() {
     if (!barbershopId) return;
 
     const payload = {
-      name,
+      name: name.trim(),
       price: Number(price),
       duration_minutes: Number(duration),
       barbershop_id: barbershopId,
@@ -110,10 +112,7 @@ export default function ServicosPage() {
   async function handleDelete(service: Service) {
     if (!confirm(`Deseja remover o serviço "${service.name}"?`)) return;
 
-    const { error } = await supabase
-      .from("services")
-      .delete()
-      .eq("id", service.id);
+    const { error } = await supabase.from("services").delete().eq("id", service.id);
 
     if (error) {
       alert("Erro ao remover: " + error.message);
@@ -153,7 +152,7 @@ export default function ServicosPage() {
             <div>
               <p className="font-bold">{s.name}</p>
               <p className="text-sm opacity-70">
-                R$ {s.price.toFixed(2)} • {s.duration_minutes} min
+                R$ {Number(s.price).toFixed(2)} • {s.duration_minutes} min
               </p>
             </div>
 

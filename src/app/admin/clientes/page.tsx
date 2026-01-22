@@ -1,218 +1,237 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
-import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
-type Client = {
+type Profile = {
   id: string;
-  name: string;
-  phone: string | null;
+  role: string;
+  barbershop_id: string | null;
+  name?: string | null;
 };
 
-export default function ClientesPage() {
+type AppointmentRow = {
+  client_name: string | null;
+  client_phone: string | null;
+  created_at: string | null;
+};
+
+type ClientItem = {
+  key: string; // phone/name unique key
+  name: string;
+  phone: string;
+  last_seen_at: string | null;
+  total_appointments: number;
+};
+
+function onlyDigits(v: string) {
+  return (v || "").replace(/\D/g, "");
+}
+
+function formatPhoneBR(raw: string) {
+  const d = onlyDigits(raw);
+  if (!d) return "-";
+  // simples (sem mascaras complexas): 11 dígitos -> (DD) 9xxxx-xxxx
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return d;
+}
+
+export default function AdminClientesPage() {
   const supabase = createClient();
+  const router = useRouter();
 
-  const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState<string | null>(null);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [rows, setRows] = useState<AppointmentRow[]>([]);
 
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const clients = useMemo<ClientItem[]>(() => {
+    // Dedup por telefone (prioridade), senão por nome
+    const map = new Map<string, ClientItem>();
 
-  async function loadClients() {
+    for (const r of rows) {
+      const name = (r.client_name || "").trim() || "—";
+      const phoneDigits = onlyDigits(r.client_phone || "");
+      const phone = phoneDigits || "";
+      const key = phone ? `p:${phone}` : `n:${name.toLowerCase()}`;
+
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, {
+          key,
+          name,
+          phone,
+          last_seen_at: r.created_at ?? null,
+          total_appointments: 1,
+        });
+      } else {
+        prev.total_appointments += 1;
+        const prevTime = prev.last_seen_at ? new Date(prev.last_seen_at).getTime() : 0;
+        const nowTime = r.created_at ? new Date(r.created_at).getTime() : 0;
+        if (nowTime > prevTime) prev.last_seen_at = r.created_at ?? prev.last_seen_at;
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const ta = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0;
+      const tb = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [rows]);
+
+  const loadClients = useCallback(async () => {
     setLoading(true);
+    setMsg(null);
 
-    const barbershopId = await getCurrentBarbershopIdBrowser();
-    if (!barbershopId) {
+    // 1) auth
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+
+    if (userErr) {
+      setMsg(userErr.message);
       setLoading(false);
       return;
     }
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, name, phone")
-      .eq("barbershop_id", barbershopId)
-      .eq("role", "client")
-      .order("name");
-
-    if (error) {
-      alert("Erro ao buscar clientes: " + error.message);
-    } else {
-      setClients(data || []);
+    if (!user) {
+      router.replace("/login");
+      return;
     }
 
+    // 2) profile
+    const { data: prof, error: profErr } = await supabase
+      .from("profiles")
+      .select("id, role, barbershop_id, name")
+      .eq("id", user.id)
+      .single();
+
+    if (profErr || !prof) {
+      setMsg("Perfil não encontrado.");
+      setLoading(false);
+      return;
+    }
+
+    setProfile(prof as Profile);
+
+    if (prof.role !== "admin") {
+      setMsg("Acesso negado: apenas admin.");
+      setLoading(false);
+      return;
+    }
+
+    if (!prof.barbershop_id) {
+      setMsg("Este admin é da plataforma (barbershop_id NULL).");
+      setLoading(false);
+      return;
+    }
+
+    // 3) clientes = vem de appointments
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("client_name, client_phone, created_at")
+      .eq("barbershop_id", prof.barbershop_id)
+      .not("client_name", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+
+    if (error) {
+      setMsg("Erro ao buscar clientes: " + error.message);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
+    setRows(Array.isArray(data) ? (data as AppointmentRow[]) : []);
     setLoading(false);
-  }
+  }, [router, supabase]);
 
   useEffect(() => {
     loadClients();
-  }, []);
-
-  function openNewModal() {
-    setEditingClient(null);
-    setName("");
-    setPhone("");
-    setModalOpen(true);
-  }
-
-  function openEditModal(client: Client) {
-    setEditingClient(client);
-    setName(client.name);
-    setPhone(client.phone || "");
-    setModalOpen(true);
-  }
-
-  async function handleSave() {
-    if (!name.trim()) {
-      alert("Nome é obrigatório");
-      return;
-    }
-
-    const barbershopId = await getCurrentBarbershopIdBrowser();
-    if (!barbershopId) return;
-
-    if (editingClient) {
-      // update
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          name,
-          phone,
-        })
-        .eq("id", editingClient.id);
-
-      if (error) {
-        alert("Erro ao atualizar: " + error.message);
-        return;
-      }
-    } else {
-      // insert
-      const { error } = await supabase.from("profiles").insert({
-        name,
-        phone,
-        role: "client",
-        barbershop_id: barbershopId,
-      });
-
-      if (error) {
-        alert("Erro ao criar cliente: " + error.message);
-        return;
-      }
-    }
-
-    setModalOpen(false);
-    await loadClients();
-  }
-
-  async function handleDelete(client: Client) {
-    if (!confirm(`Deseja remover ${client.name}?`)) return;
-
-    const { error } = await supabase.from("profiles").delete().eq("id", client.id);
-
-    if (error) {
-      alert("Erro ao remover: " + error.message);
-      return;
-    }
-
-    await loadClients();
-  }
-
-  if (loading) {
-    return <div className="p-8">Carregando clientes...</div>;
-  }
+  }, [loadClients]);
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-yellow-400">Clientes</h1>
+    <div className="min-h-screen bg-black text-white">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6">
+        <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-4xl font-black">
+              👥 Clientes <span className="text-yellow-400">do seu negócio</span>
+            </h1>
+            <p className="text-zinc-400 mt-2">
+              Lista gerada automaticamente pelos agendamentos (appointments).
+            </p>
+          </div>
 
-        <button
-          onClick={openNewModal}
-          className="bg-yellow-400 text-black font-bold px-4 py-2 rounded"
-        >
-          + Novo cliente
-        </button>
-      </div>
+          <button
+            onClick={loadClients}
+            disabled={loading}
+            className="h-12 px-6 rounded-xl bg-white/10 hover:bg-white/15 transition font-black disabled:opacity-50"
+          >
+            {loading ? "Atualizando..." : "Atualizar"}
+          </button>
+        </header>
 
-      <div className="bg-zinc-900 rounded overflow-hidden">
-        {clients.length === 0 && (
-          <p className="p-4 opacity-70">Nenhum cliente cadastrado.</p>
+        {msg && (
+          <div className="bg-red-950/40 border border-red-500/30 text-red-200 rounded-xl p-4">
+            {msg}
+          </div>
         )}
 
-        {clients.map((c) => (
-          <div
-            key={c.id}
-            className="flex justify-between items-center border-b border-white/10 p-4"
-          >
-            <div>
-              <p className="font-bold">{c.name}</p>
-              {c.phone && <p className="text-sm opacity-70">{c.phone}</p>}
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => openEditModal(c)}
-                className="px-3 py-1 bg-zinc-700 rounded"
-              >
-                Editar
-              </button>
-              <button
-                onClick={() => handleDelete(c)}
-                className="px-3 py-1 bg-red-600 rounded"
-              >
-                Remover
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* MODAL */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-zinc-900 p-6 rounded w-full max-w-md space-y-4">
-            <h2 className="text-xl font-bold text-yellow-400">
-              {editingClient ? "Editar cliente" : "Novo cliente"}
+        <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-white/10 flex items-center justify-between">
+            <h2 className="text-lg sm:text-xl font-black">
+              Total: <span className="text-yellow-400">{clients.length}</span>
             </h2>
-
-            <div>
-              <label className="block mb-1">Nome</label>
-              <input
-                className="w-full bg-black border border-white/10 p-2 rounded"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block mb-1">Telefone</label>
-              <input
-                className="w-full bg-black border border-white/10 p-2 rounded"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setModalOpen(false)}
-                className="px-4 py-2 bg-zinc-700 rounded"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-yellow-400 text-black font-bold rounded"
-              >
-                Salvar
-              </button>
+            <div className="text-xs text-zinc-500">
+              Logado:{" "}
+              <span className="text-zinc-300 font-semibold">
+                {profile?.name || profile?.id || "—"}
+              </span>
             </div>
           </div>
-        </div>
-      )}
+
+          <div className="p-4 sm:p-6 space-y-3">
+            {loading && <div className="text-zinc-400">Carregando...</div>}
+
+            {!loading && clients.length === 0 && (
+              <div className="text-zinc-400">
+                Nenhum cliente encontrado ainda. Faça um agendamento para aparecer aqui.
+              </div>
+            )}
+
+            {clients.map((c) => (
+              <div
+                key={c.key}
+                className="border border-white/10 rounded-xl p-4 bg-black/30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <p className="font-black text-lg truncate">{c.name}</p>
+                  <p className="text-sm text-zinc-400">
+                    Tel:{" "}
+                    <span className="text-zinc-200 font-semibold">
+                      {c.phone ? formatPhoneBR(c.phone) : "-"}
+                    </span>{" "}
+                    • Agendamentos:{" "}
+                    <span className="text-zinc-200 font-semibold">{c.total_appointments}</span>
+                  </p>
+                </div>
+
+                <div className="text-xs text-zinc-500">
+                  Última visita:{" "}
+                  <span className="text-zinc-300 font-semibold">
+                    {c.last_seen_at ? new Date(c.last_seen_at).toLocaleString() : "—"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
