@@ -196,7 +196,10 @@ export default function MinhaBarbeariaPage() {
     };
 
     // ✅ dica: se der erro aqui, quase sempre é RLS/policy bloqueando UPDATE
-    const { error } = await supabase.from("barbershops").update(payload).eq("id", shop.id);
+    const { error } = await supabase
+      .from("barbershops")
+      .update(payload)
+      .eq("id", shop.id);
 
     if (error) {
       setMsg("Erro ao salvar: " + error.message);
@@ -217,9 +220,13 @@ export default function MinhaBarbeariaPage() {
             <h1 className="text-3xl md:text-5xl font-black">
               Minha <span className="text-yellow-400">barbearia</span>
             </h1>
+
+            {/* ✅ agora mostra o NOME da barbearia (quando carregada) */}
             <p className="text-zinc-400 mt-2">
               Edite os dados que aparecem na landing{" "}
-              <span className="text-zinc-200 font-semibold">/b/[slug]</span>
+              <span className="text-zinc-200 font-semibold">
+                {shop?.name ? shop.name : "/b/[slug]"}
+              </span>
             </p>
           </div>
 
@@ -288,8 +295,13 @@ export default function MinhaBarbeariaPage() {
                   placeholder="Ex: barbearia-do-ze"
                 />
                 <p className="text-xs text-zinc-500 mt-1">
-                  Usado em <span className="text-zinc-300 font-semibold">/b/{shop.slug}</span> e{" "}
-                  <span className="text-zinc-300 font-semibold">/agendar/{shop.slug}</span>. (Após salvar, o slug muda lá também.)
+                  Usado em{" "}
+                  <span className="text-zinc-300 font-semibold">/b/{shop.slug}</span>{" "}
+                  e{" "}
+                  <span className="text-zinc-300 font-semibold">
+                    /agendar/{shop.slug}
+                  </span>
+                  . (Após salvar, o slug muda lá também.)
                 </p>
               </div>
 
@@ -364,16 +376,7 @@ export default function MinhaBarbeariaPage() {
               </Link>
             </div>
 
-            <div className="pt-4 text-xs text-zinc-500">
-              Logado como:{" "}
-              <span className="text-zinc-300 font-semibold">
-                {profile?.name || profile?.id}
-              </span>{" "}
-              • barbershop_id:{" "}
-              <span className="text-zinc-300 font-semibold">
-                {profile?.barbershop_id}
-              </span>
-            </div>
+            {/* ✅ removido: debug com email/id/barbershop_id */}
           </section>
         )}
       </div>

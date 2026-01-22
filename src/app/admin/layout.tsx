@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { ReactNode, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/browser";
 
 type NavItem = {
   href: string;
@@ -11,13 +12,13 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { href: "/admin/dashboard", label: "📊 Dashboard" },
-  { href: "/admin/agenda", label: "📅 Agenda" },
-  { href: "/admin/barbeiros", label: "💈 Barbeiros" },
+
+  // ✅ novo: Barbearias (admin da plataforma)
+  { href: "/admin/saas/barbearias", label: "🏪 Barbearias" },
+
   { href: "/admin/servicos", label: "✂️ Serviços" },
-  { href: "/admin/horarios", label: "⏰ Horários" },
-  // ✅ removido: Clientes (cliente nasce do agendamento, não cadastro manual)
   { href: "/admin/relatorios", label: "📈 Relatórios" },
-  { href: "/admin/planos", label: "💳 Planos" }, // ✅ novo
+  { href: "/admin/planos", label: "💳 Planos" },
   { href: "/admin/minha-barbearia", label: "🏪 Minha Barbearia" },
 ];
 
@@ -53,8 +54,86 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/**
+ * Guard:
+ * - Se for admin de barbearia (profiles.role=admin e barbershop_id NOT NULL)
+ * - e barbershops.onboarded_at estiver NULL
+ * => redireciona para /admin/onboarding
+ *
+ * Admin plataforma (barbershop_id NULL) NÃO passa pelo onboarding.
+ */
+function useOnboardingGuard() {
+  const supabase = createClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      // não trava a própria página do onboarding
+      if (pathname?.startsWith("/admin/onboarding")) {
+        setChecking(false);
+        return;
+      }
+
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr) {
+        setChecking(false);
+        return;
+      }
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("role, barbershop_id")
+        .eq("id", user.id)
+        .single();
+
+      if (profErr || !prof) {
+        setChecking(false);
+        return;
+      }
+
+      // admin plataforma: não precisa onboarding
+      if (prof.role !== "admin" || !prof.barbershop_id) {
+        setChecking(false);
+        return;
+      }
+
+      const { data: shop, error: shopErr } = await supabase
+        .from("barbershops")
+        .select("onboarded_at, onboarding_step")
+        .eq("id", prof.barbershop_id)
+        .single();
+
+      if (shopErr) {
+        setChecking(false);
+        return;
+      }
+
+      if (!shop?.onboarded_at) {
+        router.replace("/admin/onboarding");
+        return;
+      }
+
+      setChecking(false);
+    })();
+  }, [pathname, router, supabase]);
+
+  return checking;
+}
+
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const checking = useOnboardingGuard();
 
   // trava scroll do body quando drawer abre (mobile)
   useEffect(() => {
@@ -74,6 +153,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
+        <div className="text-zinc-300">Carregando...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black text-white">

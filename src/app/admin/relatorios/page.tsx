@@ -93,11 +93,13 @@ export default function AdminRelatoriosPage() {
 
       if (userErr) {
         setError(userErr.message);
+        setLoading(false);
         return;
       }
 
       if (!user) {
         setError("Você precisa estar logado.");
+        setLoading(false);
         return;
       }
 
@@ -109,16 +111,19 @@ export default function AdminRelatoriosPage() {
 
       if (pErr) {
         setError("Erro ao carregar profile: " + pErr.message);
+        setLoading(false);
         return;
       }
 
       if (profile?.role !== "admin") {
         setError("Acesso negado: você não é admin dessa barbearia.");
+        setLoading(false);
         return;
       }
 
       if (!profile?.barbershop_id) {
         setError("Seu usuário não está vinculado a nenhuma barbearia.");
+        setLoading(false);
         return;
       }
 
@@ -389,7 +394,6 @@ export default function AdminRelatoriosPage() {
               <p className="text-zinc-400">Sem dados no período.</p>
             ) : (
               <div className="w-full">
-                {/* Wrapper “à prova de mobile” */}
                 <div className="mx-auto w-full max-w-[320px] sm:max-w-[360px] md:max-w-[420px] aspect-square overflow-hidden">
                   <ResponsiveContainer>
                     <PieChart>
@@ -411,7 +415,6 @@ export default function AdminRelatoriosPage() {
                   </ResponsiveContainer>
                 </div>
 
-                {/* Legenda (melhor no mobile do que label no gráfico) */}
                 <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
                   {chartData.map((d) => (
                     <div
@@ -427,7 +430,6 @@ export default function AdminRelatoriosPage() {
             )}
           </Card>
 
-          {/* Ranking barbeiros */}
           <Card>
             <h2 className="text-lg sm:text-xl font-bold mb-4">
               Ranking de barbeiros (mês)
@@ -453,7 +455,6 @@ export default function AdminRelatoriosPage() {
           </Card>
         </div>
 
-        {/* Ranking serviços */}
         <Card>
           <h2 className="text-lg sm:text-xl font-bold mb-4">
             Serviços mais realizados (mês)

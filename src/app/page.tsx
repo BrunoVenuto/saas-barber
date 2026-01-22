@@ -70,12 +70,14 @@ export default function LandingPage() {
                   >
                     Entrar
                   </Link>
-                  <Link
-                    href="/login"
+                  <a
+                    href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
+                    target="_blank"
+                    rel="noreferrer"
                     className="px-4 py-2 rounded-xl bg-yellow-400 text-black font-black hover:brightness-110 transition shadow-[0_10px_40px_rgba(255,215,70,0.22)]"
                   >
                     Começar
-                  </Link>
+                  </a>
                 </div>
 
                 {/* Mobile menu (details/summary) */}
@@ -135,12 +137,14 @@ export default function LandingPage() {
                           >
                             Entrar
                           </Link>
-                          <Link
-                            href="/login"
+                          <a
+                            href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
+                            target="_blank"
+                            rel="noreferrer"
                             className="h-11 rounded-xl bg-yellow-400 text-black font-black hover:brightness-110 transition grid place-items-center shadow-[0_14px_55px_rgba(255,215,70,0.25)]"
                           >
                             Começar
-                          </Link>
+                          </a>
                         </div>
 
                         <p className="mt-3 text-[11px] text-white/55 px-1">
@@ -186,12 +190,14 @@ export default function LandingPage() {
                     </p>
 
                     <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                      <Link
-                        href="/login"
+                      <a
+                        href="https://wa.me/5531995453632?text=Quero%20saber%20mais%20sobre%20o%20Barber%20Premium%20SaaS"
+                        target="_blank"
+                        rel="noreferrer"
                         className="h-12 sm:h-14 px-8 rounded-2xl bg-yellow-400 text-black font-black grid place-items-center hover:brightness-110 transition shadow-[0_16px_60px_rgba(255,215,70,0.28)]"
                       >
                         🚀 Testar agora
-                      </Link>
+                      </a>
 
                       <a
                         href="#exemplo"
@@ -205,7 +211,7 @@ export default function LandingPage() {
 
                 <div className="hidden lg:block absolute right-10 bottom-10 z-10">
                   <Link
-                    href="/login"
+                    href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
                     className="px-10 py-4 rounded-2xl bg-yellow-400 text-black font-black text-lg hover:brightness-110 transition shadow-[0_18px_70px_rgba(255,215,70,0.34)]"
                   >
                     Começar
@@ -323,8 +329,10 @@ export default function LandingPage() {
                       </ul>
 
                       <a
-                        href="/auth/register"
+                        href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
                         className="mt-8 h-12 rounded-xl bg-white/10 border border-white/15 hover:bg-white/15 transition font-black grid place-items-center"
+                        target="_blank"
+                        rel="noreferrer"
                       >
                         Começar
                       </a>
@@ -354,8 +362,10 @@ export default function LandingPage() {
                       </ul>
 
                       <a
-                        href="/auth/register"
+                        href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
                         className="mt-8 h-12 rounded-xl bg-yellow-400 text-black font-black grid place-items-center hover:brightness-110 transition"
+                        target="_blank"
+                        rel="noreferrer"
                       >
                         Começar agora
                       </a>
@@ -380,8 +390,10 @@ export default function LandingPage() {
                       </ul>
 
                       <a
-                        href="/auth/register"
+                        href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
                         className="mt-8 h-12 rounded-xl bg-white/10 border border-white/15 hover:bg-white/15 transition font-black grid place-items-center"
+                        target="_blank"
+                        rel="noreferrer"
                       >
                         Falar com vendas
                       </a>
@@ -490,12 +502,14 @@ export default function LandingPage() {
                       </div>
 
                       <div className="pt-2">
-                        <Link
-                          href="/login"
+                        <a
+                          href="https://wa.me/5531995453632?text=Quero%20come%C3%A7ar%20agora%20e%20criar%20minha%20conta"
+                          target="_blank"
+                          rel="noreferrer"
                           className="inline-flex items-center justify-center h-12 px-8 rounded-2xl bg-yellow-400 text-black font-black hover:brightness-110 transition shadow-[0_16px_60px_rgba(255,215,70,0.25)]"
                         >
                           Quero isso na minha barbearia
-                        </Link>
+                        </a>
                       </div>
                     </div>
 
@@ -556,14 +570,16 @@ export default function LandingPage() {
                 </div>
 
                 <div className="mt-7 flex flex-col sm:flex-row gap-3">
-                  <Link
-                    href="/login"
+                  <a
+                    href="https://wa.me/5531995453632?text=Quero%20come%C3%A7ar%20agora%20e%20criar%20minha%20conta"
+                    target="_blank"
+                    rel="noreferrer"
                     className="h-12 sm:h-14 px-8 rounded-2xl bg-yellow-400 text-black font-black grid place-items-center hover:brightness-110 transition shadow-[0_16px_60px_rgba(255,215,70,0.25)]"
                   >
                     Criar minha conta
-                  </Link>
+                  </a>
                   <a
-                    href="https://wa.me/5531995453632"
+                    href="https://wa.me/5531995453632?text=Quero%20contratar%20o%20Barber%20Premium%20SaaS"
                     target="_blank"
                     rel="noreferrer"
                     className="h-12 sm:h-14 px-8 rounded-2xl bg-emerald-500 text-black font-black grid place-items-center hover:brightness-110 transition"

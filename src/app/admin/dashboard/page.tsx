@@ -132,15 +132,20 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const totalToday = appointmentsToday.reduce(
-    (sum, a) => sum + (a.service?.[0]?.price || 0),
-    0
-  );
+  // ✅ Ajuste pedido: somar faturamento de forma correta (somente concluídos)
+  function isCompletedStatus(status: string | null) {
+    return status === "completed" || status === "done";
+  }
 
-  const totalMonth = appointmentsMonth.reduce(
-    (sum, a) => sum + (a.service?.[0]?.price || 0),
-    0
-  );
+  const totalToday = appointmentsToday.reduce((sum, a) => {
+    if (!isCompletedStatus(a.status)) return sum;
+    return sum + (a.service?.[0]?.price || 0);
+  }, 0);
+
+  const totalMonth = appointmentsMonth.reduce((sum, a) => {
+    if (!isCompletedStatus(a.status)) return sum;
+    return sum + (a.service?.[0]?.price || 0);
+  }, 0);
 
   if (loading) {
     return <div className="p-10 text-white">Carregando dashboard...</div>;
@@ -182,9 +187,7 @@ export default function DashboardPage() {
 
       {/* LISTA DE HOJE */}
       <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-yellow-400">
-          ⏱️ Agenda de Hoje
-        </h2>
+        <h2 className="text-2xl font-bold text-yellow-400">⏱️ Agenda de Hoje</h2>
 
         {appointmentsToday.length === 0 && (
           <p className="text-zinc-500">Nenhum atendimento hoje.</p>
