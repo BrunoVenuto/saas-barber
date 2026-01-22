@@ -6,6 +6,12 @@ import { createClient } from "@/lib/supabase/browser";
 
 type Role = "admin" | "barber" | "client" | string;
 
+function parseHashParams(hash: string) {
+  // hash vem tipo "#access_token=...&type=invite"
+  const h = (hash || "").startsWith("#") ? hash.slice(1) : hash;
+  return new URLSearchParams(h);
+}
+
 export default function LoginClient() {
   const supabase = createClient();
   const router = useRouter();
@@ -22,23 +28,40 @@ export default function LoginClient() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    const type = searchParams.get("type");
-    const accessToken = searchParams.get("access_token");
+  // next (padrão do middleware)
+  const next = searchParams.get("next") || null;
 
-    if (type === "invite" || accessToken) {
+  useEffect(() => {
+    // Detecta convite tanto por query quanto por HASH
+    const typeQ = searchParams.get("type"); // às vezes vem em query
+    const accessTokenQ = searchParams.get("access_token");
+
+    const hashParams =
+      typeof window !== "undefined" ? parseHashParams(window.location.hash) : null;
+
+    const typeH = hashParams?.get("type");
+    const accessTokenH = hashParams?.get("access_token");
+
+    const isInvite = typeQ === "invite" || typeH === "invite" || !!accessTokenQ || !!accessTokenH;
+
+    if (isInvite) {
       setMode("set-password");
       setMsg("Convite detectado! Crie sua senha para finalizar seu acesso.");
     } else {
       setMode("login");
     }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function redirectByRole(userId: string) {
-    const redirectTo = searchParams.get("redirect");
-    if (redirectTo) {
-      router.replace(redirectTo);
+    // Prioridade: next do middleware
+    // Evita loop caso alguém mande next=/login
+    const safeNext =
+      next && next !== "/login" && !next.startsWith("/login?") ? next : null;
+
+    if (safeNext) {
+      router.replace(safeNext);
       return;
     }
 
@@ -59,7 +82,7 @@ export default function LoginClient() {
       if (profile.barbershop_id === null) {
         router.replace("/admin/saas/barbearias");
       } else {
-        router.replace("/admin/agenda");
+        router.replace("/admin/onboarding"); // ✅ admin de barbearia entra no onboarding
       }
       return;
     }
@@ -126,15 +149,19 @@ export default function LoginClient() {
 
     setLoading(true);
 
+    // Importante: após clicar no link do convite, o supabase cria sessão.
+    // Se a sessão não existir, é porque o link não foi processado corretamente (ou expirou).
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (!user) {
+    if (!session?.user) {
       setMsg("Sessão do convite não encontrada. Abra novamente o link do email.");
       setLoading(false);
       return;
     }
+
+    const user = session.user;
 
     const { error } = await supabase.auth.updateUser({
       password: newPassword,
