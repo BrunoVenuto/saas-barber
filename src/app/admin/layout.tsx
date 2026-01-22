@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { href: "/admin/saas/barbearias", label: "🏪 Barbearias" },
 
   { href: "/admin/servicos", label: "✂️ Serviços" },
+  { href: "/admin/barbeiros", label: "💈 Barbeiros" },   // ✅ AQUI
   { href: "/admin/relatorios", label: "📈 Relatórios" },
   { href: "/admin/planos", label: "💳 Planos" },
   { href: "/admin/minha-barbearia", label: "🏪 Minha Barbearia" },

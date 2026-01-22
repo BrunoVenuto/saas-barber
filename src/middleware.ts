@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-// Tipagem compatível com o que o @supabase/ssr espera internamente (SerializeOptions)
-// Note: sameSite pode ser boolean no tipo do cookie.
 type SupabaseCookieOptions = Partial<{
   path: string;
   domain: string;
@@ -20,14 +18,12 @@ type SupabaseCookieToSet = {
 };
 
 export async function middleware(req: NextRequest) {
-  // Guardamos os cookies que o Supabase pedir para setar e aplicamos no response FINAL
-  // (NextResponse.next OU NextResponse.redirect). Isso evita loop de login por perder Set-Cookie no redirect.
   const pendingCookies: SupabaseCookieToSet[] = [];
 
   const applyPendingCookies = (response: NextResponse) => {
-    pendingCookies.forEach(({ name, value, options }) => {
-      response.cookies.set({ name, value, ...options });
-    });
+    for (const c of pendingCookies) {
+      response.cookies.set({ name: c.name, value: c.value, ...c.options });
+    }
     return response;
   };
 
@@ -35,7 +31,6 @@ export async function middleware(req: NextRequest) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    // Se faltar env, não trava o app com redirect infinito
     return applyPendingCookies(NextResponse.next());
   }
 
@@ -56,71 +51,52 @@ export async function middleware(req: NextRequest) {
   const isSaasRoute = pathname.startsWith("/admin/saas");
   const isBarberRoute = pathname.startsWith("/barbeiro");
 
-  // Checa sessão/usuário
-  const { data, error: authErr } = await supabase.auth.getUser();
-  const user = data.user;
+  // 1) precisa estar logado para /admin/* e /barbeiro/*
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData.user;
 
-  if ((isAdminRoute || isBarberRoute) && (authErr || !user)) {
+  if ((isAdminRoute || isBarberRoute) && !user) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
     return applyPendingCookies(NextResponse.redirect(url));
   }
 
-  // Fora das rotas protegidas (por segurança; matcher já limita)
+  // fora das rotas protegidas (matcher já limita, mas fica seguro)
   if (!isAdminRoute && !isBarberRoute) {
     return applyPendingCookies(NextResponse.next());
   }
 
-  const { data: profile, error: profErr } = await supabase
+  // 2) pega o profile do user
+  const { data: profile } = await supabase
     .from("profiles")
     .select("role, barbershop_id")
     .eq("id", user!.id)
     .single();
 
-  if (profErr || !profile) {
+  if (!profile) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     return applyPendingCookies(NextResponse.redirect(url));
   }
 
-  // ✅ allowlist de rotas liberadas durante onboarding (PASSO 2/3/4)
-  const isOnboardingRoute = pathname.startsWith("/admin/onboarding");
-
-  // ⚠️ IMPORTANTE: usar ARRAY (não Set) pra evitar erro TS2802 com target antigo
-  const onboardingAllowedAdminRoutes: string[] = [
-    "/admin/onboarding",
-    "/admin/servicos",
-    "/admin/barbeiros",
-    "/admin/horarios",
-    "/admin/minha-barbearia",
-  ];
-
-  // helper: considera /admin/servicos/* etc também
-  const isAllowedDuringOnboarding = (() => {
-    for (const base of onboardingAllowedAdminRoutes) {
-      if (pathname === base) return true;
-      if (pathname.startsWith(base + "/")) return true;
-    }
-    return false;
-  })();
-
+  // 3) Regras /admin/*
   if (isAdminRoute) {
+    // só admin entra no /admin/*
     if (profile.role !== "admin") {
       const url = req.nextUrl.clone();
       url.pathname = profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
       return applyPendingCookies(NextResponse.redirect(url));
     }
 
-    // admin cliente (barbershop_id != null) não pode acessar /admin/saas/*
+    // admin de barbearia não pode ver /admin/saas/*
     if (isSaasRoute && profile.barbershop_id !== null) {
       const url = req.nextUrl.clone();
       url.pathname = "/admin/agenda";
       return applyPendingCookies(NextResponse.redirect(url));
     }
 
-    // ✅ Gate de onboarding: enquanto não finalizar, só deixa as rotas allowlist
-    // (apenas para admin de barbearia: barbershop_id != null)
+    // ✅ Gate de onboarding (somente admin de barbearia)
     if (profile.barbershop_id !== null) {
       const { data: shop } = await supabase
         .from("barbershops")
@@ -130,14 +106,35 @@ export async function middleware(req: NextRequest) {
 
       const isOnboarded = !!shop?.onboarded_at;
 
-      if (!isOnboarded && !isAllowedDuringOnboarding) {
+      // ✅ rotas liberadas enquanto não finalizou onboarding
+      // (ARRAY para não dar erro TS2802)
+      const allowedDuringOnboarding: string[] = [
+        "/admin/onboarding",
+        "/admin/servicos",
+        "/admin/barbeiros",
+        "/admin/horarios",
+        "/admin/minha-barbearia",
+        "/admin/agenda",
+        "/admin/dashboard",
+      ];
+
+      const isAllowed = (() => {
+        for (const base of allowedDuringOnboarding) {
+          if (pathname === base) return true;
+          if (pathname.startsWith(base + "/")) return true;
+        }
+        return false;
+      })();
+
+      // se não onboarded e tentar ir pra qualquer coisa fora da allowlist -> volta onboarding
+      if (!isOnboarded && !isAllowed) {
         const url = req.nextUrl.clone();
         url.pathname = "/admin/onboarding";
         return applyPendingCookies(NextResponse.redirect(url));
       }
 
-      // Se já onboarded e tentar acessar /admin/onboarding, joga pro dashboard
-      if (isOnboarded && isOnboardingRoute) {
+      // se já onboarded e tentar acessar onboarding -> manda pro dashboard
+      if (isOnboarded && pathname.startsWith("/admin/onboarding")) {
         const url = req.nextUrl.clone();
         url.pathname = "/admin/dashboard";
         return applyPendingCookies(NextResponse.redirect(url));
@@ -147,6 +144,7 @@ export async function middleware(req: NextRequest) {
     return applyPendingCookies(NextResponse.next());
   }
 
+  // 4) Regras /barbeiro/*
   if (isBarberRoute) {
     if (profile.role !== "barber") {
       const url = req.nextUrl.clone();
