@@ -17,29 +17,6 @@ function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getString(obj: Record<string, unknown>, key: string): string | null {
-  const v = obj[key];
-  return typeof v === "string" ? v : null;
-}
-
-type InviteResponseOk = {
-  ok: true;
-  invited_email: string;
-  barber_user_id: string;
-  barbershop_id: string;
-  redirectTo: string;
-};
-
-type InviteResponseErr = {
-  error: string;
-};
-
-type InviteResponse = InviteResponseOk | InviteResponseErr;
-
 export default function BarbeirosPage() {
   const supabase = createClient();
 
@@ -50,13 +27,9 @@ export default function BarbeirosPage() {
   const [barbershopId, setBarbershopId] = useState<string | null>(null);
   const [barbers, setBarbers] = useState<Barber[]>([]);
 
-  // modal convite
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName, setInviteName] = useState("");
-  const [invitePhone, setInvitePhone] = useState("");
+  const [myProfileId, setMyProfileId] = useState<string | null>(null);
 
-  // form create/edit manual (fallback)
+  // form create/edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -64,13 +37,30 @@ export default function BarbeirosPage() {
 
   const isEditing = useMemo(() => !!editingId, [editingId]);
 
+  const amIAlreadyBarber = useMemo(() => {
+    if (!myProfileId) return false;
+    return barbers.some((b) => b.profile_id === myProfileId);
+  }, [barbers, myProfileId]);
+
   async function loadAll() {
     setLoading(true);
     setMsg(null);
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setMsg("Usuário não autenticado.");
+      setLoading(false);
+      return;
+    }
+
+    setMyProfileId(user.id);
+
     const bsId = await getCurrentBarbershopIdBrowser();
     if (!bsId) {
-      setMsg("Não foi possível identificar a barbearia do usuário logado (barbershop_id).");
+      setMsg("Não foi possível identificar a barbearia.");
       setLoading(false);
       return;
     }
@@ -179,89 +169,34 @@ export default function BarbeirosPage() {
     setSaving(false);
   }
 
-  function openInvite() {
-    setInviteEmail("");
-    setInviteName("");
-    setInvitePhone("");
-    setInviteOpen(true);
-    setMsg(null);
-  }
-
-  async function handleInviteSubmit() {
-    setMsg(null);
-
-    const email = inviteEmail.trim().toLowerCase();
-    const nm = inviteName.trim();
-
-    if (!email) {
-      setMsg("Informe o email do barbeiro.");
-      return;
-    }
-    if (!nm) {
-      setMsg("Informe o nome do barbeiro.");
-      return;
-    }
+  async function handleBecomeBarber() {
+    if (!barbershopId || !myProfileId) return;
 
     setSaving(true);
+    setMsg(null);
 
-    try {
-      const res = await fetch("/api/admin/barbers/invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          name: nm,
-          phone: invitePhone.trim() ? onlyDigits(invitePhone) : null,
-        }),
-      });
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("id", myProfileId)
+      .single<{ name: string | null }>();
 
-      const raw: unknown = await res.json().catch(() => null);
+    const { error } = await supabase.from("barbers").insert({
+      barbershop_id: barbershopId,
+      profile_id: myProfileId,
+      name: profile?.name || "Administrador",
+      active: true,
+    });
 
-      // ✅ sem any: valida shape mínimo
-      let parsed: InviteResponse = { error: "Resposta inválida da API." };
-      if (isObject(raw)) {
-        const err = getString(raw, "error");
-        const ok = raw["ok"] === true;
-
-        if (err) {
-          parsed = { error: err };
-        } else if (ok) {
-          const invited_email = getString(raw, "invited_email") || email;
-          const barber_user_id = getString(raw, "barber_user_id") || "";
-          const barbershop_id = getString(raw, "barbershop_id") || "";
-          const redirectTo = getString(raw, "redirectTo") || "";
-
-          parsed = {
-            ok: true,
-            invited_email,
-            barber_user_id,
-            barbershop_id,
-            redirectTo,
-          };
-        }
-      }
-
-      if (!res.ok) {
-        setMsg("Erro ao convidar: " + ("error" in parsed ? parsed.error : "Falha desconhecida."));
-        setSaving(false);
-        return;
-      }
-
-      if (!("ok" in parsed) || parsed.ok !== true) {
-        setMsg("Erro ao convidar: " + ("error" in parsed ? parsed.error : "Falha desconhecida."));
-        setSaving(false);
-        return;
-      }
-
-      setMsg(`✅ Convite enviado para ${parsed.invited_email}. Ele vai criar a senha pelo link do email.`);
-      setInviteOpen(false);
-      await loadAll();
+    if (error) {
+      setMsg("Erro ao se tornar barbeiro: " + error.message);
       setSaving(false);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Erro inesperado.";
-      setMsg("Erro ao convidar: " + message);
-      setSaving(false);
+      return;
     }
+
+    setMsg("✅ Você agora é um barbeiro também!");
+    await loadAll();
+    setSaving(false);
   }
 
   if (loading) {
@@ -269,31 +204,31 @@ export default function BarbeirosPage() {
   }
 
   return (
-    <div className="p-8 space-y-6 text-white">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-3xl font-black text-yellow-400">Barbeiros</h1>
-          <p className="text-zinc-400 mt-1">
-            Convide barbeiros por email (recomendado) ou cadastre manualmente.
-          </p>
-        </div>
-
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={openInvite}
-            className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-black hover:opacity-90"
-          >
-            ✉️ Convidar barbeiro
-          </button>
-
-          <button
-            onClick={() => resetForm()}
-            className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-black hover:opacity-90"
-          >
-            + Novo (manual)
-          </button>
-        </div>
+    <div className="p-6 sm:p-8 space-y-6 text-white">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-black text-yellow-400">Barbeiros</h1>
+        <p className="text-zinc-400">Gerencie quem atende clientes na sua barbearia.</p>
       </div>
+
+      {/* BOTÃO DONO VIRAR BARBEIRO */}
+      {!amIAlreadyBarber && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          <div>
+            <p className="font-bold text-emerald-400">Você também atende clientes?</p>
+            <p className="text-sm text-zinc-300">
+              Clique no botão para aparecer como barbeiro e definir seus horários.
+            </p>
+          </div>
+
+          <button
+            onClick={handleBecomeBarber}
+            disabled={saving}
+            className="px-5 py-2 rounded-lg bg-emerald-500 text-black font-black disabled:opacity-50"
+          >
+            {saving ? "Ativando..." : "Eu também atendo"}
+          </button>
+        </div>
+      )}
 
       {msg && (
         <div className="bg-zinc-950 border border-white/10 rounded-xl p-4 text-zinc-200">
@@ -301,27 +236,26 @@ export default function BarbeirosPage() {
         </div>
       )}
 
-      {/* FORM MANUAL */}
+      {/* FORM */}
       <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 max-w-2xl space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-black">
-            {isEditing ? "Editar barbeiro" : "Cadastrar barbeiro (manual)"}
+            {isEditing ? "Editar barbeiro" : "Cadastrar barbeiro"}
           </h2>
           {isEditing && (
-            <button onClick={resetForm} className="text-sm text-zinc-300 hover:text-white underline">
+            <button onClick={resetForm} className="text-sm text-zinc-300 underline">
               cancelar edição
             </button>
           )}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-4">
+        <div className="grid gap-4">
           <div>
             <label className="text-sm text-zinc-400">Nome</label>
             <input
               className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ex: José"
             />
           </div>
 
@@ -331,11 +265,10 @@ export default function BarbeirosPage() {
               className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="Ex: (31) 99999-9999"
             />
           </div>
 
-          <div className="md:col-span-2 flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <input
               id="active"
               type="checkbox"
@@ -351,7 +284,7 @@ export default function BarbeirosPage() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="h-12 px-6 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.01] transition disabled:opacity-50"
+          className="h-12 px-6 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
         >
           {saving ? "Salvando..." : isEditing ? "Salvar alterações" : "Criar barbeiro"}
         </button>
@@ -365,28 +298,29 @@ export default function BarbeirosPage() {
           barbers.map((b) => (
             <div
               key={b.id}
-              className="bg-zinc-950 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap"
+              className="bg-zinc-950 border border-white/10 rounded-xl p-4 flex items-center justify-between"
             >
               <div>
                 <p className="font-black text-zinc-100">
-                  {b.name} {!b.active && <span className="text-xs text-zinc-400">(inativo)</span>}
+                  {b.name}{" "}
+                  {!b.active && <span className="text-xs text-zinc-400">(inativo)</span>}
+                  {b.profile_id === myProfileId && (
+                    <span className="ml-2 text-xs text-emerald-400">(você)</span>
+                  )}
                 </p>
-                <p className="text-zinc-400 text-sm">
-                  {b.phone ? b.phone : "sem telefone"} •{" "}
-                  {b.profile_id ? "tem login (convite)" : "manual (sem login)"}
-                </p>
+                {b.phone && <p className="text-zinc-400 text-sm">{b.phone}</p>}
               </div>
 
               <div className="flex gap-2">
                 <button
                   onClick={() => startEdit(b)}
-                  className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 font-black"
+                  className="px-4 py-2 rounded-lg bg-white/10 font-black"
                 >
                   Editar
                 </button>
                 <button
                   onClick={() => handleDelete(b.id)}
-                  className="px-4 py-2 rounded-lg bg-red-600 hover:opacity-90 font-black"
+                  className="px-4 py-2 rounded-lg bg-red-600 font-black"
                 >
                   Remover
                 </button>
@@ -395,79 +329,6 @@ export default function BarbeirosPage() {
           ))
         )}
       </div>
-
-      {/* MODAL CONVITE */}
-      {inviteOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="w-full max-w-md bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl font-black text-emerald-300">Convidar barbeiro</h3>
-              <button
-                type="button"
-                onClick={() => setInviteOpen(false)}
-                className="h-10 w-10 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition grid place-items-center"
-                aria-label="Fechar"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-sm text-zinc-400">
-              O barbeiro recebe um email, cria a senha e entra direto na área dele.
-            </p>
-
-            <div>
-              <label className="text-sm text-zinc-400">Email</label>
-              <input
-                className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="ex: barbeiro@gmail.com"
-                autoComplete="email"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm text-zinc-400">Nome</label>
-              <input
-                className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                value={inviteName}
-                onChange={(e) => setInviteName(e.target.value)}
-                placeholder="Ex: João"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm text-zinc-400">Telefone (opcional)</label>
-              <input
-                className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                value={invitePhone}
-                onChange={(e) => setInvitePhone(e.target.value)}
-                placeholder="Ex: (31) 99999-9999"
-              />
-            </div>
-
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setInviteOpen(false)}
-                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 font-black"
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                onClick={handleInviteSubmit}
-                disabled={saving}
-                className="px-4 py-2 rounded-xl bg-emerald-500 text-black font-black disabled:opacity-50"
-              >
-                {saving ? "Enviando..." : "Enviar convite"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
