@@ -56,7 +56,7 @@ export default function BarbeiroHorariosPage() {
     const { data: barber, error } = await supabase
       .from("barbers")
       .select("id, barbershop_id")
-      .eq("user_id", user.id)
+      .eq("profile_id", user.id)
       .single();
 
     if (error || !barber) {
