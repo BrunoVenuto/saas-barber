@@ -77,6 +77,47 @@ function statusLabel(s: string) {
   return s;
 }
 
+function buildWhatsAppUrlConfirm(ap: Appointment) {
+  const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
+  if (!phone) return null;
+
+  const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
+Confirmando seu agendamento:
+📅 ${ap.date}
+🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 ${ap.service_name || "Serviço"}
+
+Está tudo certo?`;
+
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
+
+function buildWhatsAppUrlCancel(ap: Appointment) {
+  const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
+  if (!phone) return null;
+
+  const msg = `Olá, ${ap.client_name || "tudo bem?"}!
+⚠️ Precisamos cancelar seu agendamento.
+
+📅 ${ap.date}
+🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 ${ap.service_name || "Serviço"}
+
+Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
+
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
+
+/**
+ * 🔒 Anti pop-up block:
+ * abre a aba IMEDIATAMENTE no clique (sem await antes).
+ * Retorna a referência da janela (ou null se bloqueado).
+ */
+function openWhatsAppWindow(url: string) {
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  return w;
+}
+
 export default function BarberDashboardPage() {
   const supabase = createClient();
 
@@ -91,7 +132,7 @@ export default function BarberDashboardPage() {
 
   // --------------------------
   // Load barber linked to user
-  // ✅ Alinhado com API: usa barbers.profile_id (profile.id === user.id)
+  // ✅ usa barbers.profile_id (profile.id === user.id)
   // --------------------------
   useEffect(() => {
     (async () => {
@@ -181,7 +222,6 @@ export default function BarberDashboardPage() {
     const rows = Array.isArray(res.data) ? (res.data as AppointmentRowDb[]) : [];
 
     // ✅ scheduled -> pending
-    // ✅ done permanece done
     const mapped: Appointment[] = rows.map((a) => ({
       id: a.id,
       date: a.date,
@@ -204,54 +244,6 @@ export default function BarberDashboardPage() {
   }, [barber?.id, day]);
 
   // --------------------------
-  // WhatsApp helper
-  // --------------------------
-  function openWhatsAppConfirm(ap: Appointment) {
-    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
-    if (!phone) {
-      alert("Esse agendamento não tem telefone do cliente.");
-      return false;
-    }
-
-    const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
-Confirmando seu agendamento:
-📅 ${ap.date}
-🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
-💈 ${ap.service_name || "Serviço"}
-
-Está tudo certo?`;
-
-    window.open(
-      `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,
-      "_blank"
-    );
-    return true;
-  }
-
-  function openWhatsAppCancel(ap: Appointment) {
-    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
-    if (!phone) {
-      alert("Esse agendamento não tem telefone do cliente.");
-      return false;
-    }
-
-    const msg = `Olá, ${ap.client_name || "tudo bem?"}!
-⚠️ Precisamos cancelar seu agendamento.
-
-📅 ${ap.date}
-🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
-💈 ${ap.service_name || "Serviço"}
-
-Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
-
-    window.open(
-      `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,
-      "_blank"
-    );
-    return true;
-  }
-
-  // --------------------------
   // API Status update (server)
   // --------------------------
   async function confirmAppointment(ap: Appointment) {
@@ -260,7 +252,21 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    openWhatsAppConfirm(ap);
+    // ✅ abre WhatsApp imediatamente (evita bloqueio)
+    const waUrl = buildWhatsAppUrlConfirm(ap);
+    let waWin: Window | null = null;
+
+    if (!waUrl) {
+      alert("Esse agendamento não tem telefone do cliente.");
+    } else {
+      waWin = openWhatsAppWindow(waUrl);
+      if (!waWin) {
+        // browser bloqueou popup
+        setStatusMsg(
+          "Seu navegador bloqueou a abertura do WhatsApp. Toque no botão 'WhatsApp' do card para abrir manualmente."
+        );
+      }
+    }
 
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/confirm`, {
       method: "POST",
@@ -269,6 +275,8 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
+      // se a API falhar e a janela abriu, fecha para não confundir
+      if (waWin && !waWin.closed) waWin.close();
       setStatusMsg("Erro ao confirmar: " + (json?.error || "Falha na API"));
       setUpdatingId(null);
       return;
@@ -301,7 +309,20 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    openWhatsAppCancel(ap);
+    // ✅ abre WhatsApp imediatamente (evita bloqueio)
+    const waUrl = buildWhatsAppUrlCancel(ap);
+    let waWin: Window | null = null;
+
+    if (!waUrl) {
+      alert("Esse agendamento não tem telefone do cliente.");
+    } else {
+      waWin = openWhatsAppWindow(waUrl);
+      if (!waWin) {
+        setStatusMsg(
+          "Seu navegador bloqueou a abertura do WhatsApp. Toque no botão 'WhatsApp' do card para abrir manualmente."
+        );
+      }
+    }
 
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/cancel`, {
       method: "POST",
@@ -310,6 +331,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
+      if (waWin && !waWin.closed) waWin.close();
       setStatusMsg("Erro ao cancelar: " + (json?.error || "Falha na API"));
       setUpdatingId(null);
       return;
@@ -326,9 +348,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
     if (!barber) return;
 
     const ok = confirm(
-      `Marcar como CONCLUÍDO?\n\n${hhmm(ap.start_time)} • ${
-        ap.client_name || "Cliente"
-      }`
+      `Marcar como CONCLUÍDO?\n\n${hhmm(ap.start_time)} • ${ap.client_name || "Cliente"}`
     );
     if (!ok) return;
 
@@ -413,15 +433,11 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Pendentes</p>
-            <p className="text-2xl font-black text-yellow-300">
-              {summary.pending}
-            </p>
+            <p className="text-2xl font-black text-yellow-300">{summary.pending}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Confirmados</p>
-            <p className="text-2xl font-black text-green-400">
-              {summary.confirmed}
-            </p>
+            <p className="text-2xl font-black text-green-400">{summary.confirmed}</p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Concluídos</p>
@@ -429,9 +445,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Cancelados</p>
-            <p className="text-2xl font-black text-red-400">
-              {summary.canceled}
-            </p>
+            <p className="text-2xl font-black text-red-400">{summary.canceled}</p>
           </div>
         </section>
 
@@ -446,8 +460,7 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
         <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
           <div className="p-4 md:p-6 border-b border-white/10 flex items-center justify-between">
             <h2 className="text-xl font-black">
-              Agendamentos do dia{" "}
-              <span className="text-yellow-400">{day}</span>
+              Agendamentos do dia <span className="text-yellow-400">{day}</span>
             </h2>
             {loading && <span className="text-zinc-400">Carregando...</span>}
           </div>
@@ -466,6 +479,8 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
                 ap.status !== "done";
 
               const canComplete = ap.status !== "canceled" && ap.status !== "done";
+
+              const waConfirmUrl = buildWhatsAppUrlConfirm(ap);
 
               return (
                 <div
@@ -525,15 +540,18 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
 
                       {!canCancel && ap.status !== "canceled" && ap.status !== "done" && (
                         <div className="text-xs text-amber-300 mt-1">
-                          ⚠️ Cancelamento só com {CANCEL_MINUTES_NOTICE} min de
-                          antecedência.
+                          ⚠️ Cancelamento só com {CANCEL_MINUTES_NOTICE} min de antecedência.
                         </div>
                       )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
                       <button
-                        disabled={updatingId === ap.id || ap.status === "confirmed" || ap.status === "done"}
+                        disabled={
+                          updatingId === ap.id ||
+                          ap.status === "confirmed" ||
+                          ap.status === "done"
+                        }
                         onClick={() => confirmAppointment(ap)}
                         className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-black transition disabled:opacity-50"
                       >
@@ -557,8 +575,20 @@ Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
                       </button>
 
                       <button
-                        onClick={() => openWhatsAppConfirm(ap)}
-                        className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition"
+                        disabled={!waConfirmUrl}
+                        onClick={() => {
+                          if (!waConfirmUrl) {
+                            alert("Esse agendamento não tem telefone do cliente.");
+                            return;
+                          }
+                          const w = openWhatsAppWindow(waConfirmUrl);
+                          if (!w) {
+                            setStatusMsg(
+                              "Seu navegador bloqueou a abertura do WhatsApp. Permita pop-ups ou use outro navegador."
+                            );
+                          }
+                        }}
+                        className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"
                       >
                         WhatsApp
                       </button>
