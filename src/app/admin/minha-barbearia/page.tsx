@@ -213,7 +213,7 @@ export default function MinhaBarbeariaPage() {
             </h1>
             <p className="text-zinc-400 mt-2">
               Edite os dados que aparecem na landing{" "}
-              <span className="text-zinc-200 font-semibold">/b/[slug]</span>
+              <span className="text-zinc-200 font-semibold">/b/{shop?.slug}</span>
             </p>
           </div>
 

@@ -1,229 +1,194 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
-
-type Profile = {
-  id: string;
-  role: string;
-  barbershop_id: string | null;
-};
+import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
 type Shop = {
   id: string;
   name: string;
   slug: string;
-  whatsapp: string | null;
-  city: string | null;
-  address: string | null;
-  instagram: string | null;
   onboarded_at: string | null;
   onboarding_step: number | null;
 };
 
-function onlyDigits(v: string) {
-  return (v || "").replace(/\D/g, "");
+type Counts = {
+  services: number;
+  barbers: number;
+  working_hours: number;
+};
+
+function clampStep(v: number) {
+  if (!Number.isFinite(v)) return 1;
+  if (v < 1) return 1;
+  if (v > 4) return 4;
+  return v;
 }
 
-function normalizeInstagram(v: string) {
-  const s = (v || "").trim();
-  if (!s) return "";
-  return s.startsWith("@") ? s : `@${s}`;
-}
-
-function slugify(input: string) {
-  return (input || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 60);
-}
-
-function clampStep(n: number) {
-  if (n < 1) return 1;
-  if (n > 4) return 4;
-  return n;
-}
-
-export default function AdminOnboardingPage() {
+export default function OnboardingPage() {
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [shop, setShop] = useState<Shop | null>(null);
+  const [counts, setCounts] = useState<Counts>({ services: 0, barbers: 0, working_hours: 0 });
 
-  const step = useMemo(() => clampStep(shop?.onboarding_step ?? 1), [shop?.onboarding_step]);
+  const stepFromUrl = useMemo(() => {
+    const raw = Number(searchParams.get("step") || "1");
+    return clampStep(raw);
+  }, [searchParams]);
 
-  // form step 1
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [whatsapp, setWhatsapp] = useState("");
-  const [city, setCity] = useState("");
-  const [address, setAddress] = useState("");
-  const [instagram, setInstagram] = useState("");
-
-  const previewSlug = useMemo(() => slugify(slug || name), [slug, name]);
-
-  async function loadAll() {
+  // =========================
+  // Carrega barbearia + contagens
+  // =========================
+  async function load() {
     setLoading(true);
     setMsg(null);
 
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
-
-    if (userErr) {
-      setMsg(userErr.message);
+    const barbershopId = await getCurrentBarbershopIdBrowser();
+    if (!barbershopId) {
+      setMsg("Não consegui identificar sua barbearia. Faça login novamente.");
       setLoading(false);
       return;
     }
 
-    if (!user) {
-      router.replace("/login");
-      return;
-    }
-
-    const { data: prof, error: profErr } = await supabase
-      .from("profiles")
-      .select("id, role, barbershop_id")
-      .eq("id", user.id)
-      .single();
-
-    if (profErr || !prof) {
-      setMsg("Perfil não encontrado.");
-      setLoading(false);
-      return;
-    }
-
-    if (prof.role !== "admin" || !prof.barbershop_id) {
-      setMsg("Acesso negado.");
-      setLoading(false);
-      return;
-    }
-
-    setProfile(prof as Profile);
-
-    const { data: s, error: sErr } = await supabase
+    const { data: shopData, error: shopErr } = await supabase
       .from("barbershops")
-      .select("id,name,slug,whatsapp,city,address,instagram,onboarded_at,onboarding_step")
-      .eq("id", prof.barbershop_id)
+      .select("id,name,slug,onboarded_at,onboarding_step")
+      .eq("id", barbershopId)
       .single();
 
-    if (sErr || !s) {
-      setMsg("Não consegui carregar sua barbearia.");
+    if (shopErr || !shopData) {
+      setMsg("Erro ao carregar barbearia: " + (shopErr?.message || "sem dados"));
       setLoading(false);
       return;
     }
 
-    const typed = s as Shop;
+    setShop(shopData as Shop);
 
-    // ✅ se já onboarded, manda pro dashboard
-    if (typed.onboarded_at) {
-      router.replace("/admin/dashboard");
+    // counts
+    const [servicesRes, barbersRes, whRes] = await Promise.all([
+      supabase.from("services").select("id", { count: "exact", head: true }).eq("barbershop_id", barbershopId),
+      supabase.from("barbers").select("id", { count: "exact", head: true }).eq("barbershop_id", barbershopId),
+      supabase
+        .from("working_hours")
+        .select("id", { count: "exact", head: true })
+        .eq("barbershop_id", barbershopId),
+    ]);
+
+    setCounts({
+      services: servicesRes.count || 0,
+      barbers: barbersRes.count || 0,
+      working_hours: whRes.count || 0,
+    });
+
+    // Se já estiver onboarded, manda pro painel
+    if (shopData.onboarded_at) {
+      router.replace("/admin/agenda");
       return;
     }
 
-    setShop(typed);
-
-    // preencher form
-    setName(typed.name ?? "");
-    setSlug(typed.slug ?? "");
-    setWhatsapp(typed.whatsapp ?? "");
-    setCity(typed.city ?? "");
-    setAddress(typed.address ?? "");
-    setInstagram(typed.instagram ?? "");
+    // Se o step no banco for maior que o da URL, sincroniza pra frente
+    const dbStep = clampStep(Number(shopData.onboarding_step || 1));
+    if (dbStep > stepFromUrl) {
+      router.replace(`/admin/onboarding?step=${dbStep}`);
+      return;
+    }
 
     setLoading(false);
   }
 
   useEffect(() => {
-    loadAll();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ se o usuário digitar nome e o slug estiver vazio, sugerimos automaticamente
-  useEffect(() => {
-    if (!shop) return;
-    if (slug.trim()) return;
-    const s = slugify(name);
-    if (s) setSlug(s);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name]);
+  // =========================
+  // Regras de conclusão de step
+  // =========================
+  function stepIsComplete(step: number) {
+    if (step === 1) return true; // exemplo: passo 1 só "continuar"
+    if (step === 2) return counts.services >= 1;
+    if (step === 3) return counts.barbers >= 1;
+    if (step === 4) return counts.working_hours >= 1;
+    return false;
+  }
 
-  async function saveStep(nextStepRaw: number) {
-    if (!shop) return;
+  function stepHint(step: number) {
+    if (step === 2) return `Crie pelo menos 1 serviço (atual: ${counts.services}).`;
+    if (step === 3) return `Cadastre pelo menos 1 barbeiro (atual: ${counts.barbers}).`;
+    if (step === 4) return `Cadastre pelo menos 1 horário (atual: ${counts.working_hours}).`;
+    return "";
+  }
 
-    const nextStep = clampStep(nextStepRaw);
-
-    setSaving(true);
+  // =========================
+  // Avançar step (UX)
+  // =========================
+  async function goNext() {
     setMsg(null);
 
-    const payload: Partial<Shop> = {};
+    if (!shop) return;
 
-    // Step 1 salva dados base
-    if (step === 1) {
-      const slugClean = slugify(slug || name || shop.slug);
+    const current = stepFromUrl;
 
-      if (!name.trim()) {
-        setMsg("Informe o nome da barbearia.");
-        setSaving(false);
-        return;
-      }
+    // Sempre recarrega contagens antes de validar (pra não depender do back do browser)
+    await load();
 
-      if (!slugClean) {
-        setMsg("Slug inválido.");
-        setSaving(false);
-        return;
-      }
-
-      payload.name = name.trim();
-      payload.slug = slugClean;
-      payload.whatsapp = onlyDigits(whatsapp) || null;
-      payload.city = city.trim() || null;
-      payload.address = address.trim() || null;
-      payload.instagram = instagram.trim() ? normalizeInstagram(instagram) : null;
-    }
-
-    payload.onboarding_step = nextStep;
-
-    const { error } = await supabase.from("barbershops").update(payload).eq("id", shop.id);
-
-    if (error) {
-      setMsg("Erro ao salvar: " + error.message);
-      setSaving(false);
+    const ok = stepIsComplete(current);
+    if (!ok) {
+      setMsg(stepHint(current));
       return;
     }
 
-    await loadAll();
-    setSaving(false);
-  }
-
-  async function finishOnboarding() {
-    if (!shop) return;
-
     setSaving(true);
-    setMsg(null);
+
+    // Step 4 finaliza
+    if (current >= 4) {
+      const { error } = await supabase
+        .from("barbershops")
+        .update({ onboarded_at: new Date().toISOString(), onboarding_step: 4 })
+        .eq("id", shop.id);
+
+      if (error) {
+        setMsg("Erro ao finalizar onboarding: " + error.message);
+        setSaving(false);
+        return;
+      }
+
+      setSaving(false);
+      router.replace("/admin/agenda");
+      return;
+    }
+
+    // Avança step e persiste no banco
+    const next = clampStep(current + 1);
 
     const { error } = await supabase
       .from("barbershops")
-      .update({ onboarded_at: new Date().toISOString(), onboarding_step: 4 })
+      .update({ onboarding_step: next })
       .eq("id", shop.id);
 
     if (error) {
-      setMsg("Erro ao finalizar: " + error.message);
+      setMsg("Erro ao avançar onboarding: " + error.message);
       setSaving(false);
       return;
     }
 
-    router.replace("/admin/dashboard");
+    setSaving(false);
+    router.replace(`/admin/onboarding?step=${next}`);
+  }
+
+  // =========================
+  // Ir para telas de configuração e voltar
+  // =========================
+  function goTo(path: string) {
+    // você pode manter simples, porque o botão "Próximo" agora navega corretamente.
+    router.push(path);
   }
 
   if (loading) {
@@ -235,187 +200,142 @@ export default function AdminOnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10 space-y-6">
-        <header>
-          <h1 className="text-2xl sm:text-4xl font-black">
-            Configurar <span className="text-yellow-400">sua barbearia</span>
+    <div className="min-h-screen bg-black text-white p-6">
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-black">
+            Configurar sua <span className="text-yellow-400">barbearia</span>
           </h1>
-          <p className="text-zinc-400 mt-2">Passo {step} de 4 • Termine para liberar o painel.</p>
-        </header>
+          <p className="text-zinc-400">
+            Passo <span className="text-zinc-200 font-semibold">{stepFromUrl}</span> de{" "}
+            <span className="text-zinc-200 font-semibold">4</span> · Termine para liberar o painel.
+          </p>
+          {shop?.name && (
+            <p className="text-zinc-500 text-sm">
+              Barbearia: <span className="text-zinc-200 font-semibold">{shop.name}</span>
+            </p>
+          )}
+        </div>
 
         {msg && (
-          <div className="bg-zinc-950 border border-white/10 rounded-xl p-4 text-zinc-200">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-zinc-200">
             {msg}
           </div>
         )}
 
         {/* STEP 1 */}
-        {step === 1 && (
-          <section className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
-            <h2 className="text-lg sm:text-xl font-black">1) Dados principais</h2>
+        {stepFromUrl === 1 && (
+          <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
+            <h2 className="text-xl font-black">1) Começo</h2>
+            <p className="text-zinc-400">
+              Vamos configurar o básico para você começar a usar o sistema.
+            </p>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <label className="text-sm text-zinc-400">Nome</label>
-                <input
-                  className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ex: Barbearia do Antônio"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="text-sm text-zinc-400">Slug</label>
-                <input
-                  className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder="Ex: barbearia-do-antonio"
-                />
-                <p className="text-xs text-zinc-500 mt-1">
-                  URL da landing:{" "}
-                  <span className="text-zinc-200 font-semibold">/b/{previewSlug}</span>
-                </p>
-              </div>
-
-              <div>
-                <label className="text-sm text-zinc-400">WhatsApp</label>
-                <input
-                  className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                  value={whatsapp}
-                  onChange={(e) => setWhatsapp(e.target.value)}
-                  placeholder="Ex: 31999999999"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm text-zinc-400">Cidade</label>
-                <input
-                  className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Ex: Sete Lagoas - MG"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="text-sm text-zinc-400">Endereço</label>
-                <input
-                  className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Ex: Av. Centro, 123"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="text-sm text-zinc-400">Instagram</label>
-                <input
-                  className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
-                  value={instagram}
-                  onChange={(e) => setInstagram(e.target.value)}
-                  placeholder="Ex: @barbeariadoantonio"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 flex-wrap pt-2">
+            <div className="flex gap-3">
               <button
-                onClick={() => saveStep(2)}
+                onClick={() => goNext()}
                 disabled={saving}
-                className="h-12 px-6 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
+                className="px-5 py-3 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
               >
-                {saving ? "Salvando..." : "Salvar e continuar"}
+                {saving ? "Salvando..." : "Próximo"}
               </button>
             </div>
-          </section>
+          </div>
         )}
 
         {/* STEP 2 */}
-        {step === 2 && (
-          <section className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
-            <h2 className="text-lg sm:text-xl font-black">2) Serviços</h2>
+        {stepFromUrl === 2 && (
+          <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
+            <h2 className="text-xl font-black">2) Serviços</h2>
             <p className="text-zinc-400">
-              Crie pelo menos 1 serviço em{" "}
-              <span className="text-zinc-200 font-semibold">/admin/servicos</span>.
+              Crie pelo menos 1 serviço em <span className="text-zinc-200 font-semibold">/admin/servicos</span>.
             </p>
 
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => router.push("/admin/servicos")}
-                className="h-12 px-6 rounded-xl bg-white/10 hover:bg-white/15 transition font-black"
+                onClick={() => goTo("/admin/servicos")}
+                className="px-5 py-3 rounded-xl bg-white/10 hover:bg-white/15 font-black"
               >
                 Ir para Serviços
               </button>
 
               <button
-                onClick={() => saveStep(3)}
+                onClick={() => goNext()}
                 disabled={saving}
-                className="h-12 px-6 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
+                className="px-5 py-3 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
               >
-                Já configurei → Próximo
+                {saving ? "Verificando..." : "Já configurei → Próximo"}
               </button>
             </div>
-          </section>
+
+            <p className="text-xs text-zinc-500">
+              Status: serviços cadastrados = <span className="text-zinc-200 font-semibold">{counts.services}</span>
+            </p>
+          </div>
         )}
 
         {/* STEP 3 */}
-        {step === 3 && (
-          <section className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
-            <h2 className="text-lg sm:text-xl font-black">3) Equipe</h2>
+        {stepFromUrl === 3 && (
+          <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
+            <h2 className="text-xl font-black">3) Barbeiros</h2>
             <p className="text-zinc-400">
-              Cadastre barbeiros (ou garanta que exista pelo menos 1 barbeiro).
+              Cadastre pelo menos 1 barbeiro em <span className="text-zinc-200 font-semibold">/admin/barbeiros</span>.
             </p>
 
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => router.push("/admin/barbeiros")}
-                className="h-12 px-6 rounded-xl bg-white/10 hover:bg-white/15 transition font-black"
+                onClick={() => goTo("/admin/barbeiros")}
+                className="px-5 py-3 rounded-xl bg-white/10 hover:bg-white/15 font-black"
               >
                 Ir para Barbeiros
               </button>
 
               <button
-                onClick={() => saveStep(4)}
+                onClick={() => goNext()}
                 disabled={saving}
-                className="h-12 px-6 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
+                className="px-5 py-3 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
               >
-                Já configurei → Próximo
+                {saving ? "Verificando..." : "Já configurei → Próximo"}
               </button>
             </div>
-          </section>
+
+            <p className="text-xs text-zinc-500">
+              Status: barbeiros cadastrados = <span className="text-zinc-200 font-semibold">{counts.barbers}</span>
+            </p>
+          </div>
         )}
 
         {/* STEP 4 */}
-        {step === 4 && (
-          <section className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
-            <h2 className="text-lg sm:text-xl font-black">4) Horários</h2>
-            <p className="text-zinc-400">Configure os horários para permitir agendamentos.</p>
+        {stepFromUrl === 4 && (
+          <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
+            <h2 className="text-xl font-black">4) Horários</h2>
+            <p className="text-zinc-400">
+              Cadastre pelo menos 1 horário em <span className="text-zinc-200 font-semibold">/admin/horarios</span>.
+            </p>
 
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => router.push("/admin/horarios")}
-                className="h-12 px-6 rounded-xl bg-white/10 hover:bg-white/15 transition font-black"
+                onClick={() => goTo("/admin/horarios")}
+                className="px-5 py-3 rounded-xl bg-white/10 hover:bg-white/15 font-black"
               >
                 Ir para Horários
               </button>
 
               <button
-                onClick={finishOnboarding}
+                onClick={() => goNext()}
                 disabled={saving}
-                className="h-12 px-6 rounded-xl bg-emerald-500 text-black font-black disabled:opacity-50"
+                className="px-5 py-3 rounded-xl bg-emerald-500 text-black font-black disabled:opacity-50"
               >
-                {saving ? "Finalizando..." : "Finalizar onboarding ✅"}
+                {saving ? "Finalizando..." : "Finalizar onboarding"}
               </button>
             </div>
-          </section>
-        )}
 
-        <div className="text-xs text-zinc-500">
-          Logado: <span className="text-zinc-300 font-semibold">{profile?.id}</span>
-        </div>
+            <p className="text-xs text-zinc-500">
+              Status: horários cadastrados ={" "}
+              <span className="text-zinc-200 font-semibold">{counts.working_hours}</span>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
