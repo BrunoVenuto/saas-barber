@@ -12,7 +12,7 @@ type AppointmentRow = {
   date: string; // yyyy-mm-dd
   start_time: string; // HH:mm:ss
   end_time: string; // HH:mm:ss
-  status: string | null; // pode vir null
+  status: string;
   barber_id: string;
   service_id: string | null;
   client_name: string | null;
@@ -21,7 +21,7 @@ type AppointmentRow = {
 
 type AppointmentUI = AppointmentRow & {
   barbers?: { name: string } | null;
-  services?: { name: string; duration_minutes: number | null } | null; // ✅ aqui é null-safe
+  services?: { name: string; duration_minutes: number | null } | null;
 };
 
 function hhmm(t?: string | null) {
@@ -49,19 +49,11 @@ function todayYmd() {
   return `${y}-${m}-${day}`;
 }
 
-function statusLabel(s: string | null) {
-  const v = s || "pending";
-  if (v === "pending" || v === "scheduled") return "pendente";
-  if (v === "confirmed") return "confirmado";
-  if (v === "done") return "concluído";
-  if (v === "canceled") return "cancelado";
-  return v;
-}
-
 export default function AdminAgendaPage() {
   const supabase = createClient();
 
   const [barbershopId, setBarbershopId] = useState<string | null>(null);
+
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [appointments, setAppointments] = useState<AppointmentUI[]>([]);
 
@@ -73,14 +65,20 @@ export default function AdminAgendaPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 0) Descobre barbearia do admin
+  // 0) barbershop_id do admin logado
   useEffect(() => {
     (async () => {
       setError(null);
 
       const {
         data: { user },
+        error: userErr,
       } = await supabase.auth.getUser();
+
+      if (userErr) {
+        setError(userErr.message);
+        return;
+      }
 
       if (!user) {
         setError("Você precisa estar logado.");
@@ -93,18 +91,20 @@ export default function AdminAgendaPage() {
         .eq("id", user.id)
         .single();
 
-      if (pErr || !profile) {
-        setError("Erro ao carregar profile.");
+      if (pErr) {
+        setError("Erro ao carregar profile: " + pErr.message);
         return;
       }
 
-      if (profile.role !== "admin") {
-        setError("Acesso negado.");
+      if (profile?.role !== "admin") {
+        setError("Acesso negado: você não é admin dessa barbearia.");
         return;
       }
 
-      if (!profile.barbershop_id) {
-        setError("Admin não está vinculado a nenhuma barbearia.");
+      if (!profile?.barbershop_id) {
+        setError(
+          "Seu usuário não está vinculado a nenhuma barbearia (barbershop_id = null)."
+        );
         return;
       }
 
@@ -113,16 +113,18 @@ export default function AdminAgendaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 1) Carrega barbeiros
+  // 1) Load barbers (somente da barbearia)
   useEffect(() => {
     if (!barbershopId) return;
 
     (async () => {
+      setError(null);
+
       const { data, error } = await supabase
         .from("barbers")
         .select("id, name, barbershop_id")
         .eq("barbershop_id", barbershopId)
-        .order("name");
+        .order("name", { ascending: true });
 
       if (error) {
         setError("Erro ao carregar barbeiros: " + error.message);
@@ -134,7 +136,7 @@ export default function AdminAgendaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barbershopId]);
 
-  // 2) Carrega agendamentos
+  // 2) Load appointments (evita relacionamento embutido)
   async function loadAppointments() {
     if (!barbershopId) return;
 
@@ -143,6 +145,7 @@ export default function AdminAgendaPage() {
 
     const barberIds = barbers.map((b) => b.id);
 
+    // Se ainda não carregou barbeiros, ou barbearia sem barbeiros
     if (barberIds.length === 0) {
       setAppointments([]);
       setLoading(false);
@@ -156,7 +159,7 @@ export default function AdminAgendaPage() {
       )
       .eq("date", date)
       .in("barber_id", barberIds)
-      .order("start_time");
+      .order("start_time", { ascending: true });
 
     if (barberId !== "all") q = q.eq("barber_id", barberId);
     if (status !== "all") q = q.eq("status", status);
@@ -170,15 +173,14 @@ export default function AdminAgendaPage() {
       return;
     }
 
-    const rows = (data || []) as AppointmentRow[];
+    const rows: AppointmentRow[] = (data ?? []) as AppointmentRow[];
 
-    // Serviços
+    // Buscar serviços (para nome/duração)
     const serviceIds = Array.from(
       new Set(rows.map((r) => r.service_id).filter(Boolean) as string[])
     );
 
     const servicesMap = new Map<string, ServiceMini>();
-
     if (serviceIds.length > 0) {
       const { data: sData, error: sErr } = await supabase
         .from("services")
@@ -186,7 +188,7 @@ export default function AdminAgendaPage() {
         .in("id", serviceIds);
 
       if (!sErr && Array.isArray(sData)) {
-        sData.forEach((s) => {
+        (sData as ServiceMini[]).forEach((s) => {
           servicesMap.set(s.id, {
             id: s.id,
             name: s.name,
@@ -196,17 +198,17 @@ export default function AdminAgendaPage() {
       }
     }
 
-    // Barbeiros
+    // Map de barbeiros
     const barbersMap = new Map<string, Barber>();
     barbers.forEach((b) => barbersMap.set(b.id, b));
 
+    // Monta UI
     const ui: AppointmentUI[] = rows.map((r) => {
       const b = barbersMap.get(r.barber_id);
       const s = r.service_id ? servicesMap.get(r.service_id) : null;
 
       return {
         ...r,
-        status: r.status ?? "pending",
         barbers: b ? { name: b.name } : null,
         services: s ? { name: s.name, duration_minutes: s.duration_minutes } : null,
       };
@@ -216,21 +218,52 @@ export default function AdminAgendaPage() {
     setLoading(false);
   }
 
+  // Recarrega quando muda filtros ou quando lista de barbeiros chega
   useEffect(() => {
     if (!barbershopId) return;
     loadAppointments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barbershopId, barbers, barberId, date, status]);
 
-  // 3) Atualiza status
-  async function updateStatus(id: string, newStatus: "confirmed" | "done" | "canceled") {
-    setUpdatingId(id);
+  function openWhatsApp(ap: AppointmentUI) {
+    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
+    if (!phone) {
+      alert("Esse agendamento não tem telefone do cliente.");
+      return false;
+    }
+
+    const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
+Confirmando seu agendamento:
+📅 ${ap.date}
+🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 ${ap.services?.name || "Serviço"}
+Barbeiro: ${ap.barbers?.name || "—"}
+
+Está tudo certo?`;
+
+    // ⚠️ tem que abrir no clique do usuário, senão o browser bloqueia popup
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    return true;
+  }
+
+  // 3) Update status (+ WhatsApp opcional)
+  async function updateStatus(
+    ap: AppointmentUI,
+    newStatus: "confirmed" | "done" | "canceled",
+    opts?: { openWhatsApp?: boolean }
+  ) {
+    // 1) abre WhatsApp ANTES para não ser bloqueado
+    if (opts?.openWhatsApp) {
+      openWhatsApp(ap);
+    }
+
+    setUpdatingId(ap.id);
     setError(null);
 
     const { error } = await supabase
       .from("appointments")
       .update({ status: newStatus })
-      .eq("id", id);
+      .eq("id", ap.id);
 
     if (error) {
       setError("Erro ao atualizar: " + error.message);
@@ -239,30 +272,12 @@ export default function AdminAgendaPage() {
     }
 
     setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
+      prev.map((a) => (a.id === ap.id ? { ...a, status: newStatus } : a))
     );
-
     setUpdatingId(null);
   }
 
-  function openWhatsApp(ap: AppointmentUI) {
-    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
-    if (!phone) {
-      alert("Esse agendamento não tem telefone do cliente.");
-      return;
-    }
-
-    const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
-Seu agendamento:
-📅 ${ap.date}
-🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
-💈 ${ap.services?.name || "Serviço"}
-Barbeiro: ${ap.barbers?.name || "—"}
-Status: ${statusLabel(ap.status)}`;
-
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
-  }
-
+  // 4) Resumo
   const summary = useMemo(() => {
     const total = appointments.length;
     const pending = appointments.filter(
@@ -290,7 +305,7 @@ Status: ${statusLabel(ap.status)}`;
           <button
             onClick={loadAppointments}
             disabled={!barbershopId}
-            className="px-6 py-3 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
+            className="px-6 py-3 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition disabled:opacity-50"
           >
             Atualizar
           </button>
@@ -304,6 +319,7 @@ Status: ${statusLabel(ap.status)}`;
               value={barberId}
               onChange={(e) => setBarberId(e.target.value)}
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
+              disabled={!barbershopId}
             >
               <option value="all">Todos</option>
               {barbers.map((b) => (
@@ -321,6 +337,7 @@ Status: ${statusLabel(ap.status)}`;
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
+              disabled={!barbershopId}
             />
           </div>
 
@@ -330,6 +347,7 @@ Status: ${statusLabel(ap.status)}`;
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
+              disabled={!barbershopId}
             >
               <option value="all">Todos</option>
               <option value="pending">Pendente</option>
@@ -392,59 +410,87 @@ Status: ${statusLabel(ap.status)}`;
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-3">
-                      <span className="px-3 py-1 rounded-lg bg-green-700/20 border border-green-500/20 text-green-300 font-bold">
+                      <span className="inline-flex items-center justify-center px-3 py-1 rounded-lg bg-green-700/20 border border-green-500/20 text-green-300 font-bold">
                         {hhmm(ap.start_time)} - {hhmm(ap.end_time)}
                       </span>
 
-                      <span className="font-semibold">{ap.services?.name || "Serviço"}</span>
-
-                      <span className="text-zinc-500">•</span>
-
-                      <span>
-                        Barbeiro: <b>{ap.barbers?.name || "—"}</b>
+                      <span className="text-zinc-300">
+                        <span className="font-semibold">
+                          {ap.services?.name || "Serviço"}
+                        </span>
                       </span>
 
                       <span className="text-zinc-500">•</span>
 
-                      <span className="font-bold">{statusLabel(ap.status)}</span>
+                      <span className="text-zinc-300">
+                        Barbeiro:{" "}
+                        <span className="text-white font-semibold">
+                          {ap.barbers?.name || "—"}
+                        </span>
+                      </span>
+
+                      <span className="text-zinc-500">•</span>
+
+                      <span
+                        className={`
+                          font-black
+                          ${
+                            ap.status === "confirmed"
+                              ? "text-green-400"
+                              : ap.status === "pending" || ap.status === "scheduled"
+                              ? "text-yellow-300"
+                              : ap.status === "done"
+                              ? "text-emerald-300"
+                              : ap.status === "canceled"
+                              ? "text-red-400"
+                              : "text-zinc-300"
+                          }
+                        `}
+                      >
+                        {ap.status === "scheduled" ? "pending" : ap.status}
+                      </span>
                     </div>
 
                     <div className="text-sm text-zinc-400">
                       Cliente:{" "}
-                      <span className="text-zinc-200 font-semibold">{ap.client_name || "—"}</span>{" "}
+                      <span className="text-zinc-200 font-semibold">
+                        {ap.client_name || "—"}
+                      </span>{" "}
                       • Tel:{" "}
-                      <span className="text-zinc-200 font-semibold">{ap.client_phone || "—"}</span>
+                      <span className="text-zinc-200 font-semibold">
+                        {ap.client_phone || "—"}
+                      </span>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
                     <button
                       disabled={updatingId === ap.id}
-                      onClick={() => updateStatus(ap.id, "confirmed")}
-                      className="px-4 py-2 rounded-lg bg-green-600 text-white font-black disabled:opacity-50"
+                      onClick={() => updateStatus(ap, "confirmed", { openWhatsApp: true })}
+                      className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-black transition disabled:opacity-50"
                     >
                       Confirmar
                     </button>
 
                     <button
                       disabled={updatingId === ap.id}
-                      onClick={() => updateStatus(ap.id, "done")}
-                      className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-black disabled:opacity-50"
+                      onClick={() => updateStatus(ap, "done")}
+                      className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"
                     >
                       Concluir
                     </button>
 
                     <button
                       disabled={updatingId === ap.id}
-                      onClick={() => updateStatus(ap.id, "canceled")}
-                      className="px-4 py-2 rounded-lg bg-red-600 text-white font-black disabled:opacity-50"
+                      onClick={() => updateStatus(ap, "canceled")}
+                      className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-black transition disabled:opacity-50"
                     >
                       Cancelar
                     </button>
 
                     <button
                       onClick={() => openWhatsApp(ap)}
-                      className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-black"
+                      className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition"
                     >
                       WhatsApp
                     </button>
