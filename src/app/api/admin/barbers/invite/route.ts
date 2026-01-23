@@ -43,7 +43,10 @@ export async function POST(req: Request) {
       .single();
 
     if (profErr || !profile) {
-      return NextResponse.json({ error: "Perfil não encontrado." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Perfil não encontrado." },
+        { status: 404 }
+      );
     }
 
     if (profile.role !== "admin" || !profile.barbershop_id) {
@@ -64,10 +67,16 @@ export async function POST(req: Request) {
     const phone = getString(raw, "phone");
 
     if (!email) {
-      return NextResponse.json({ error: "Informe o email do barbeiro." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Informe o email do barbeiro." },
+        { status: 400 }
+      );
     }
     if (!name) {
-      return NextResponse.json({ error: "Informe o nome do barbeiro." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Informe o nome do barbeiro." },
+        { status: 400 }
+      );
     }
 
     const body: InviteBarberBody = {
@@ -91,7 +100,7 @@ export async function POST(req: Request) {
       auth: { persistSession: false },
     });
 
-    // 4) convite (redirect cai no /login e lá ele cria senha)
+    // 4) redirect do convite -> passa primeiro pelo /callback pra setar sessão/cookies
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (!appUrl) {
       return NextResponse.json(
@@ -100,7 +109,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const redirectTo = `${appUrl}/login?type=invite`;
+    // ✅ Ajuste chave:
+    // manda o usuário pro /callback (rota pública), e de lá redireciona pro /login?type=invite
+    // Obs: como /callback está dentro do route group (auth), o path público é /callback
+    const nextAfterCallback = "/login?type=invite";
+    const redirectTo = `${appUrl}/callback?next=${encodeURIComponent(nextAfterCallback)}`;
 
     const { data: invited, error: inviteErr } =
       await adminSupabase.auth.admin.inviteUserByEmail(body.email, {
@@ -128,15 +141,17 @@ export async function POST(req: Request) {
     }
 
     // 5) garante profiles do barbeiro
-    const { error: upsertProfileErr } = await adminSupabase.from("profiles").upsert(
-      {
-        id: invitedUserId,
-        role: "barber",
-        barbershop_id: barbershopId,
-        name: body.name,
-      },
-      { onConflict: "id" }
-    );
+    const { error: upsertProfileErr } = await adminSupabase
+      .from("profiles")
+      .upsert(
+        {
+          id: invitedUserId,
+          role: "barber",
+          barbershop_id: barbershopId,
+          name: body.name,
+        },
+        { onConflict: "id" }
+      );
 
     if (upsertProfileErr) {
       return NextResponse.json(
@@ -161,13 +176,15 @@ export async function POST(req: Request) {
     }
 
     if (!existingBarber?.id) {
-      const { error: insertBarberErr } = await adminSupabase.from("barbers").insert({
-        barbershop_id: barbershopId,
-        profile_id: invitedUserId,
-        name: body.name,
-        phone: body.phone ? onlyDigits(body.phone) : null,
-        active: true,
-      });
+      const { error: insertBarberErr } = await adminSupabase
+        .from("barbers")
+        .insert({
+          barbershop_id: barbershopId,
+          profile_id: invitedUserId,
+          name: body.name,
+          phone: body.phone ? onlyDigits(body.phone) : null,
+          active: true,
+        });
 
       if (insertBarberErr) {
         return NextResponse.json(

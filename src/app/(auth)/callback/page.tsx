@@ -34,6 +34,20 @@ function parseHash(hash: string): HashParams {
   return out;
 }
 
+function getNextFromUrl(): string {
+  // /callback?next=/login?type=invite
+  try {
+    const sp = new URLSearchParams(
+      typeof window !== "undefined" ? window.location.search : ""
+    );
+    const next = sp.get("next");
+    // fallback seguro
+    return next && next.startsWith("/") ? next : "/login";
+  } catch {
+    return "/login";
+  }
+}
+
 export default function AuthCallbackPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -43,6 +57,8 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     (async () => {
       try {
+        const next = getNextFromUrl();
+
         // 1) Se veio do email (invite/recovery) normalmente vem HASH #access_token=...
         const hash = typeof window !== "undefined" ? window.location.hash : "";
         const h = parseHash(hash);
@@ -67,11 +83,11 @@ export default function AuthCallbackPage() {
             return;
           }
 
-          // limpa o hash da URL por segurança/estética
+          // limpa hash/params da URL por estética/segurança
           window.history.replaceState({}, "", "/callback");
 
-          // ✅ depois do convite, o correto é definir senha
-          router.replace("/update-password");
+          // ✅ volta pro destino (ex: /login?type=invite)
+          router.replace(next);
           return;
         }
 
@@ -84,10 +100,11 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        // Se já tem sessão, manda pra senha (seguro no fluxo de convite)
-        router.replace("/update-password");
+        // ✅ já tem sessão -> segue pro destino
+        router.replace(next);
       } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : "Erro inesperado no callback.";
+        const message =
+          e instanceof Error ? e.message : "Erro inesperado no callback.";
         setMsg(message);
         router.replace("/login");
       }
