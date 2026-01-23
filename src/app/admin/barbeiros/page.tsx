@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
@@ -35,15 +35,13 @@ export default function BarbeirosPage() {
 
   const isEditing = useMemo(() => !!editingId, [editingId]);
 
-  // -------------------------
-  // ✅ MODAL: convidar barbeiro
-  // -------------------------
+  // invite modal
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
   const [inviteName, setInviteName] = useState("");
-  const [inviting, setInviting] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
 
-  const loadAll = useCallback(async () => {
+  async function loadAll() {
     setLoading(true);
     setMsg(null);
 
@@ -70,11 +68,12 @@ export default function BarbeirosPage() {
 
     setBarbers((data as Barber[]) || []);
     setLoading(false);
-  }, [supabase]);
+  }
 
   useEffect(() => {
     loadAll();
-  }, [loadAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function resetForm() {
     setEditingId(null);
@@ -102,6 +101,7 @@ export default function BarbeirosPage() {
     setSaving(true);
     setMsg(null);
 
+    // OBS: se sua tabela barbers NÃO tiver a coluna phone, remova "phone" daqui.
     const payload = {
       name: n,
       phone: phone.trim() ? onlyDigits(phone) : null,
@@ -157,53 +157,43 @@ export default function BarbeirosPage() {
     setSaving(false);
   }
 
-  function openInviteModal() {
-    setInviteEmail("");
+  function openInvite() {
+    setInviteMsg(null);
     setInviteName("");
+    setInviteEmail("");
     setInviteOpen(true);
   }
 
-  async function handleInvite() {
-    setMsg(null);
+  async function submitInvite() {
+    setInviteMsg(null);
 
     const email = inviteEmail.trim().toLowerCase();
     const nm = inviteName.trim();
 
-    if (!email) {
-      setMsg("Informe o email do barbeiro.");
-      return;
-    }
-    // validação simples
-    if (!email.includes("@") || !email.includes(".")) {
-      setMsg("Email inválido.");
+    if (!email || !email.includes("@")) {
+      setInviteMsg("Informe um email válido.");
       return;
     }
 
-    setInviting(true);
+    setSaving(true);
 
     const res = await fetch("/api/admin/barbers/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        name: nm || null,
-      }),
+      body: JSON.stringify({ email, name: nm || null }),
     });
 
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
-      setMsg("Erro ao convidar: " + (json?.error || "Falha na API"));
-      setInviting(false);
+      setInviteMsg(json?.error || "Falha ao convidar barbeiro.");
+      setSaving(false);
       return;
     }
 
-    setMsg("✅ Convite enviado! O barbeiro vai receber um email para criar a senha.");
-    setInviteOpen(false);
-    setInviting(false);
-
-    // Atualiza lista (para aparecer profile_id preenchido quando o fluxo concluir)
+    setInviteMsg("✅ Convite enviado! Peça para ele abrir o email e criar a senha.");
     await loadAll();
+    setSaving(false);
   }
 
   if (loading) {
@@ -212,27 +202,27 @@ export default function BarbeirosPage() {
 
   return (
     <div className="p-8 space-y-6 text-white">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-yellow-400">Barbeiros</h1>
           <p className="text-zinc-400 mt-1">
-            Cadastre barbeiros e/ou convide por email para eles criarem a senha e acessarem o painel.
+            Cadastre manualmente ou convide por email (recomendado).
           </p>
         </div>
 
         <div className="flex gap-2 flex-wrap">
           <button
-            onClick={openInviteModal}
-            className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-black hover:opacity-90"
-          >
-            ✉️ Convidar barbeiro
-          </button>
-
-          <button
             onClick={() => resetForm()}
             className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-black hover:opacity-90"
           >
             + Novo barbeiro
+          </button>
+
+          <button
+            onClick={openInvite}
+            className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-black hover:opacity-90"
+          >
+            ✉️ Convidar barbeiro
           </button>
         </div>
       </div>
@@ -246,9 +236,14 @@ export default function BarbeirosPage() {
       {/* FORM */}
       <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 max-w-2xl space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-black">{isEditing ? "Editar barbeiro" : "Cadastrar barbeiro"}</h2>
+          <h2 className="text-xl font-black">
+            {isEditing ? "Editar barbeiro" : "Cadastrar barbeiro"}
+          </h2>
           {isEditing && (
-            <button onClick={resetForm} className="text-sm text-zinc-300 hover:text-white underline">
+            <button
+              onClick={resetForm}
+              className="text-sm text-zinc-300 hover:text-white underline"
+            >
               cancelar edição
             </button>
           )}
@@ -273,11 +268,15 @@ export default function BarbeirosPage() {
               onChange={(e) => setPhone(e.target.value)}
               placeholder="Ex: (31) 99999-9999"
             />
-            <p className="text-xs text-zinc-500 mt-1">Salvamos apenas números.</p>
           </div>
 
           <div className="md:col-span-2 flex items-center gap-3">
-            <input id="active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            <input
+              id="active"
+              type="checkbox"
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+            />
             <label htmlFor="active" className="text-sm text-zinc-300">
               Ativo (aparece para o cliente)
             </label>
@@ -301,24 +300,18 @@ export default function BarbeirosPage() {
           barbers.map((b) => (
             <div
               key={b.id}
-              className="bg-zinc-950 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap"
+              className="bg-zinc-950 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
             >
               <div>
                 <p className="font-black text-zinc-100">
-                  {b.name} {!b.active && <span className="text-xs text-zinc-400">(inativo)</span>}
+                  {b.name}{" "}
+                  {!b.active && <span className="text-xs text-zinc-400">(inativo)</span>}
                 </p>
 
-                <div className="text-sm text-zinc-400 space-y-0.5">
-                  {b.phone && <p>Tel: {b.phone}</p>}
-                  <p className="text-xs">
-                    Login:{" "}
-                    {b.profile_id ? (
-                      <span className="text-emerald-300 font-semibold">vinculado</span>
-                    ) : (
-                      <span className="text-amber-300 font-semibold">não vinculado</span>
-                    )}
-                  </p>
-                </div>
+                <p className="text-zinc-400 text-sm">
+                  {b.phone ? `Tel: ${b.phone}` : "Tel: —"} •{" "}
+                  {b.profile_id ? "Tem login ✅" : "Sem login (convide por email) ⚠️"}
+                </p>
               </div>
 
               <div className="flex gap-2">
@@ -340,18 +333,12 @@ export default function BarbeirosPage() {
         )}
       </div>
 
-      {/* ✅ MODAL CONVIDAR */}
+      {/* MODAL CONVIDAR */}
       {inviteOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-md bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-black text-emerald-300">Convidar barbeiro</h3>
-                <p className="text-sm text-zinc-400 mt-1">
-                  Ele vai receber um email para <b>criar a senha</b> e entrar na área do barbeiro.
-                </p>
-              </div>
-
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xl font-black text-emerald-300">Convidar barbeiro</h3>
               <button
                 onClick={() => setInviteOpen(false)}
                 className="h-10 w-10 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition grid place-items-center"
@@ -360,6 +347,16 @@ export default function BarbeirosPage() {
                 ✕
               </button>
             </div>
+
+            <p className="text-sm text-zinc-400">
+              Vamos enviar um email. O barbeiro cria a senha e entra na área dele.
+            </p>
+
+            {inviteMsg && (
+              <div className="bg-black/40 border border-white/10 rounded-xl p-3 text-zinc-200 text-sm">
+                {inviteMsg}
+              </div>
+            )}
 
             <div>
               <label className="text-sm text-zinc-400">Nome (opcional)</label>
@@ -377,32 +374,27 @@ export default function BarbeirosPage() {
                 className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 outline-none"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="ex: joao@gmail.com"
+                placeholder="joao@exemplo.com"
                 autoComplete="email"
               />
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 justify-end pt-2">
               <button
                 onClick={() => setInviteOpen(false)}
-                className="h-12 px-5 rounded-xl bg-white/10 hover:bg-white/15 transition font-black"
-                disabled={inviting}
+                className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 transition font-black"
+                disabled={saving}
               >
                 Cancelar
               </button>
-
               <button
-                onClick={handleInvite}
-                className="h-12 flex-1 rounded-xl bg-emerald-500 text-black font-black hover:opacity-95 disabled:opacity-50"
-                disabled={inviting}
+                onClick={submitInvite}
+                className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-black hover:opacity-90 disabled:opacity-50"
+                disabled={saving}
               >
-                {inviting ? "Enviando..." : "Enviar convite"}
+                {saving ? "Enviando..." : "Enviar convite"}
               </button>
             </div>
-
-            <p className="text-xs text-zinc-500">
-              Dica: se o email já existir no Auth, a API deve retornar erro (ou você pode implementar “reativar vínculo”).
-            </p>
           </div>
         </div>
       )}
