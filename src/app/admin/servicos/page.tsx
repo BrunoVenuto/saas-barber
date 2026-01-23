@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
@@ -13,6 +14,8 @@ type Service = {
 
 export default function ServicosPage() {
   const supabase = createClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,12 +27,15 @@ export default function ServicosPage() {
   const [price, setPrice] = useState("");
   const [duration, setDuration] = useState("");
 
-  const loadServices = useCallback(async () => {
+  // Se veio do onboarding, o onboarding vai mandar:
+  // /admin/servicos?next=/admin/onboarding?step=3
+  const nextUrl = searchParams.get("next");
+
+  async function loadServices() {
     setLoading(true);
 
     const barbershopId = await getCurrentBarbershopIdBrowser();
     if (!barbershopId) {
-      setServices([]);
       setLoading(false);
       return;
     }
@@ -42,17 +48,17 @@ export default function ServicosPage() {
 
     if (error) {
       alert("Erro ao buscar serviços: " + error.message);
-      setServices([]);
     } else {
       setServices((data as Service[]) || []);
     }
 
     setLoading(false);
-  }, [supabase]);
+  }
 
   useEffect(() => {
     loadServices();
-  }, [loadServices]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function openNewModal() {
     setEditingService(null);
@@ -107,6 +113,11 @@ export default function ServicosPage() {
 
     setModalOpen(false);
     await loadServices();
+
+    // ✅ UX: se veio do onboarding, após salvar volta direto pro próximo passo
+    if (nextUrl) {
+      router.push(nextUrl);
+    }
   }
 
   async function handleDelete(service: Service) {

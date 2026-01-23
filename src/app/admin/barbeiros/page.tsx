@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
@@ -18,6 +19,8 @@ function onlyDigits(v: string) {
 
 export default function BarbeirosPage() {
   const supabase = createClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,26 +37,20 @@ export default function BarbeirosPage() {
 
   const isEditing = useMemo(() => !!editingId, [editingId]);
 
-  const resetForm = useCallback(() => {
-    setEditingId(null);
-    setName("");
-    setPhone("");
-    setActive(true);
-  }, []);
+  // Se veio do onboarding, o onboarding vai mandar:
+  // /admin/barbeiros?next=/admin/onboarding?step=4
+  const nextUrl = searchParams.get("next");
 
-  const loadAll = useCallback(async () => {
+  async function loadAll() {
     setLoading(true);
     setMsg(null);
 
     const bsId = await getCurrentBarbershopIdBrowser();
     if (!bsId) {
       setMsg("Não foi possível identificar a barbearia do usuário logado (barbershop_id).");
-      setBarbers([]);
-      setBarbershopId(null);
       setLoading(false);
       return;
     }
-
     setBarbershopId(bsId);
 
     const { data, error } = await supabase
@@ -71,11 +68,19 @@ export default function BarbeirosPage() {
 
     setBarbers((data as Barber[]) || []);
     setLoading(false);
-  }, [supabase]);
+  }
 
   useEffect(() => {
     loadAll();
-  }, [loadAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setPhone("");
+    setActive(true);
+  }
 
   function startEdit(b: Barber) {
     setEditingId(b.id);
@@ -110,10 +115,15 @@ export default function BarbeirosPage() {
         setSaving(false);
         return;
       }
+
       setMsg("✅ Barbeiro criado!");
       resetForm();
       await loadAll();
       setSaving(false);
+
+      // ✅ UX: se veio do onboarding, após salvar volta direto pro próximo passo
+      if (nextUrl) router.push(nextUrl);
+
       return;
     }
 
@@ -129,6 +139,9 @@ export default function BarbeirosPage() {
     resetForm();
     await loadAll();
     setSaving(false);
+
+    // ✅ UX: se veio do onboarding, após salvar volta direto pro próximo passo
+    if (nextUrl) router.push(nextUrl);
   }
 
   async function handleDelete(id: string) {
@@ -167,7 +180,7 @@ export default function BarbeirosPage() {
         </div>
 
         <button
-          onClick={resetForm}
+          onClick={() => resetForm()}
           className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-black hover:opacity-90"
         >
           + Novo barbeiro
@@ -252,7 +265,9 @@ export default function BarbeirosPage() {
               <div>
                 <p className="font-black text-zinc-100">
                   {b.name}{" "}
-                  {!b.active && <span className="text-xs text-zinc-400">(inativo)</span>}
+                  {!b.active && (
+                    <span className="text-xs text-zinc-400">(inativo)</span>
+                  )}
                 </p>
                 {b.phone && <p className="text-zinc-400 text-sm">{b.phone}</p>}
               </div>

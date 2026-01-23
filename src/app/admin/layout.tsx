@@ -5,7 +5,20 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
-type NavItem = { href: string; label: string };
+type NavItem = {
+  href: string;
+  label: string;
+};
+
+type Profile = {
+  role: string | null;
+  barbershop_id: string | null;
+};
+
+type Shop = {
+  onboarded_at: string | null;
+  onboarding_step: number | null;
+};
 
 function cx(...arr: Array<string | false | null | undefined>) {
   return arr.filter(Boolean).join(" ");
@@ -46,13 +59,14 @@ function NavLinks({
 }
 
 /**
- * Guard:
- * - Se for admin de barbearia (profiles.role=admin e barbershop_id NOT NULL)
- * - e barbershops.onboarded_at estiver NULL
- * => redireciona para /admin/onboarding
- *
- * ✅ MAS: durante onboarding, libera rotas necessárias (serviços, barbeiros, etc)
- * Admin plataforma (barbershop_id NULL) NÃO passa pelo onboarding.
+ * ✅ Guard melhorado:
+ * - Admin SaaS (barbershop_id NULL): nunca passa por onboarding.
+ * - Admin de barbearia:
+ *   - se onboarded_at NULL => redireciona para /admin/onboarding
+ *   - EXCETO: permite acessar a tela do "passo atual" durante onboarding:
+ *     step 2: /admin/servicos
+ *     step 3: /admin/barbeiros
+ *     step 4: /admin/horarios
  */
 function useOnboardingGuard() {
   const supabase = createClient();
@@ -60,25 +74,18 @@ function useOnboardingGuard() {
   const pathname = usePathname();
 
   const [checking, setChecking] = useState(true);
-  const [profile, setProfile] = useState<{ role: string; barbershop_id: string | null } | null>(
-    null
-  );
-
-  // rotas permitidas enquanto onboarded_at ainda é null
-  const onboardingAllowedPrefixes = useMemo(
-    () => [
-      "/admin/onboarding",
-      "/admin/servicos",
-      "/admin/barbeiros",
-      "/admin/horarios",
-      "/admin/minha-barbearia",
-    ],
-    []
-  );
+  const [profile, setProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
+    let alive = true;
+
     (async () => {
-      setChecking(true);
+      // Sempre deixa a própria página do onboarding carregar
+      if (pathname?.startsWith("/admin/onboarding")) {
+        if (!alive) return;
+        setChecking(false);
+        return;
+      }
 
       const {
         data: { user },
@@ -86,6 +93,7 @@ function useOnboardingGuard() {
       } = await supabase.auth.getUser();
 
       if (userErr) {
+        if (!alive) return;
         setChecking(false);
         return;
       }
@@ -101,23 +109,33 @@ function useOnboardingGuard() {
         .eq("id", user.id)
         .single();
 
+      if (!alive) return;
+
       if (profErr || !prof) {
         setChecking(false);
         return;
       }
 
-      setProfile(prof);
+      const typedProf = prof as Profile;
+      setProfile(typedProf);
 
-      // ✅ admin plataforma: não faz onboarding
-      if (prof.role !== "admin" || !prof.barbershop_id) {
+      // ✅ Admin SaaS: libera tudo
+      if (typedProf.role === "admin" && typedProf.barbershop_id === null) {
         setChecking(false);
         return;
       }
 
+      // Se não é admin de barbearia, deixa middleware/rotas cuidarem
+      if (typedProf.role !== "admin" || !typedProf.barbershop_id) {
+        setChecking(false);
+        return;
+      }
+
+      // Busca status do onboarding
       const { data: shop, error: shopErr } = await supabase
         .from("barbershops")
-        .select("onboarded_at")
-        .eq("id", prof.barbershop_id)
+        .select("onboarded_at, onboarding_step")
+        .eq("id", typedProf.barbershop_id)
         .single();
 
       if (shopErr) {
@@ -125,19 +143,56 @@ function useOnboardingGuard() {
         return;
       }
 
-      // ✅ se ainda não onboardou, só bloqueia fora da allowlist
-      if (!shop?.onboarded_at) {
-        const allowed = onboardingAllowedPrefixes.some((p) => pathname?.startsWith(p));
-        if (!allowed) {
-          router.replace("/admin/onboarding");
-          return;
+      const s = shop as Shop;
+
+      // ✅ Se já onboarded: libera
+      if (s?.onboarded_at) {
+        setChecking(false);
+        return;
+      }
+
+      // ✅ Ainda NÃO onboarded: permitir páginas do passo atual
+      const step = s?.onboarding_step ?? 1;
+
+      const allowedByStep = (() => {
+        // sempre permite acessar a "Minha Barbearia" durante onboarding
+        if (pathname?.startsWith("/admin/minha-barbearia")) return true;
+
+        if (step <= 1) return pathname?.startsWith("/admin/onboarding") ?? false;
+
+        if (step === 2) {
+          return (
+            (pathname?.startsWith("/admin/servicos") ?? false) ||
+            (pathname?.startsWith("/admin/onboarding") ?? false)
+          );
         }
+
+        if (step === 3) {
+          return (
+            (pathname?.startsWith("/admin/barbeiros") ?? false) ||
+            (pathname?.startsWith("/admin/onboarding") ?? false)
+          );
+        }
+
+        // step 4
+        return (
+          (pathname?.startsWith("/admin/horarios") ?? false) ||
+          (pathname?.startsWith("/admin/onboarding") ?? false)
+        );
+      })();
+
+      if (!allowedByStep) {
+        router.replace("/admin/onboarding");
+        return;
       }
 
       setChecking(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+
+    return () => {
+      alive = false;
+    };
+  }, [pathname, router, supabase]);
 
   return { checking, profile };
 }
@@ -146,25 +201,37 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const { checking, profile } = useOnboardingGuard();
 
-  const navItems: NavItem[] = useMemo(() => {
-    const base: NavItem[] = [{ href: "/admin/dashboard", label: "📊 Dashboard" }];
+  // Menu dinâmico:
+  // - Admin SaaS (barbershop_id NULL): mostra Barbearias/Planos
+  // - Admin Barbearia: mostra Agenda/Serviços/Barbeiros/Horários etc
+  const navItems = useMemo<NavItem[]>(() => {
+    const isAdmin = profile?.role === "admin";
+    const isSaasAdmin = isAdmin && profile?.barbershop_id === null;
+    const isShopAdmin = isAdmin && !!profile?.barbershop_id;
 
-    // ✅ só admin plataforma (barbershop_id null) vê "Barbearias"
-    if (profile?.role === "admin" && profile?.barbershop_id === null) {
-      base.push({ href: "/admin/saas/barbearias", label: "🏪 Barbearias" });
+    if (isSaasAdmin) {
+      return [
+        { href: "/admin/dashboard", label: "📊 Dashboard" },
+        { href: "/admin/saas/barbearias", label: "🏪 Barbearias" },
+        { href: "/admin/planos", label: "💳 Planos" },
+      ];
     }
 
-    // admin da barbearia
-    base.push(
-      { href: "/admin/servicos", label: "✂️ Serviços" },
-      { href: "/admin/barbeiros", label: "💈 Barbeiros" },
-      { href: "/admin/relatorios", label: "📈 Relatórios" },
-      { href: "/admin/planos", label: "💳 Planos" },
-      { href: "/admin/minha-barbearia", label: "🏪 Minha Barbearia" }
-    );
+    if (isShopAdmin) {
+      return [
+        { href: "/admin/dashboard", label: "📊 Dashboard" },
+        { href: "/admin/agenda", label: "📅 Agenda" },
+        { href: "/admin/servicos", label: "✂️ Serviços" },
+        { href: "/admin/barbeiros", label: "💈 Barbeiros" },
+        { href: "/admin/horarios", label: "⏰ Horários" },
+        { href: "/admin/relatorios", label: "📈 Relatórios" },
+        { href: "/admin/minha-barbearia", label: "🏪 Minha Barbearia" },
+      ];
+    }
 
-    return base;
-  }, [profile]);
+    // fallback (antes de carregar profile)
+    return [{ href: "/admin/dashboard", label: "📊 Dashboard" }];
+  }, [profile?.role, profile?.barbershop_id]);
 
   // trava scroll do body quando drawer abre (mobile)
   useEffect(() => {
@@ -213,7 +280,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
           <div className="min-w-0">
             <p className="font-black tracking-tight truncate">Admin</p>
-            <p className="text-[11px] text-white/60 -mt-0.5 truncate">Barber Premium</p>
+            <p className="text-[11px] text-white/60 -mt-0.5 truncate">
+              Barber Premium
+            </p>
           </div>
 
           <div className="h-11 w-11 rounded-xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center">
@@ -240,7 +309,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 </div>
                 <div className="min-w-0">
                   <p className="font-black tracking-tight truncate">Admin</p>
-                  <p className="text-[11px] text-white/60 -mt-0.5 truncate">Menu</p>
+                  <p className="text-[11px] text-white/60 -mt-0.5 truncate">
+                    Menu
+                  </p>
                 </div>
               </div>
 
