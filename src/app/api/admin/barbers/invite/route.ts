@@ -2,47 +2,49 @@ import { NextResponse } from "next/server";
 import { createClient as createAuthedClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 
+type InviteBarberBody = {
+  email: string;
+  name: string;
+  phone?: string | null;
+};
+
 function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
 }
 
-type InviteBody = {
-  email?: unknown;
-  name?: unknown;
-  phone?: unknown;
-};
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-type ProfileRow = {
-  role: string | null;
-  barbershop_id: string | null;
-};
+function getString(obj: Record<string, unknown>, key: string): string | null {
+  const v = obj[key];
+  return typeof v === "string" ? v : null;
+}
 
 export async function POST(req: Request) {
   try {
-    // 1) Autenticado (cookie) - quem chama é o admin da barbearia logado
+    // 0) client com sessão do usuário logado (RLS normal)
     const supabase = createAuthedClient();
 
     const {
       data: { user },
-      error: userErr,
+      error: authErr,
     } = await supabase.auth.getUser();
 
-    if (userErr || !user) {
+    if (authErr || !user) {
       return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
     }
 
-    // 2) Checar permissão: precisa ser admin de barbearia (role=admin e barbershop_id NOT NULL)
-    const { data: prof, error: profErr } = await supabase
+    // 1) valida admin de barbearia
+    const { data: profile, error: profErr } = await supabase
       .from("profiles")
       .select("role, barbershop_id")
       .eq("id", user.id)
       .single();
 
-    if (profErr || !prof) {
+    if (profErr || !profile) {
       return NextResponse.json({ error: "Perfil não encontrado." }, { status: 404 });
     }
-
-    const profile = prof as ProfileRow;
 
     if (profile.role !== "admin" || !profile.barbershop_id) {
       return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
@@ -50,24 +52,31 @@ export async function POST(req: Request) {
 
     const barbershopId = profile.barbershop_id;
 
-    // 3) Body
-    const raw = (await req.json().catch(() => null)) as InviteBody | null;
+    // 2) body
+    const raw = (await req.json().catch(() => null)) as unknown;
 
-    const email = typeof raw?.email === "string" ? raw.email.trim().toLowerCase() : "";
-    const name = typeof raw?.name === "string" ? raw.name.trim() : "";
-    const phone = typeof raw?.phone === "string" ? raw.phone.trim() : "";
+    if (!isObject(raw)) {
+      return NextResponse.json({ error: "Body inválido." }, { status: 400 });
+    }
+
+    const email = (getString(raw, "email") || "").trim().toLowerCase();
+    const name = (getString(raw, "name") || "").trim();
+    const phone = getString(raw, "phone");
 
     if (!email) {
-      return NextResponse.json({ error: "Informe o email." }, { status: 400 });
+      return NextResponse.json({ error: "Informe o email do barbeiro." }, { status: 400 });
     }
     if (!name) {
       return NextResponse.json({ error: "Informe o nome do barbeiro." }, { status: 400 });
     }
 
-    // 4) Service role (ignora RLS) para:
-    // - convidar usuário no Auth
-    // - upsert no profiles
-    // - insert no barbers
+    const body: InviteBarberBody = {
+      email,
+      name,
+      phone: phone ? phone.trim() : null,
+    };
+
+    // 3) service client (ignora RLS)
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -82,8 +91,7 @@ export async function POST(req: Request) {
       auth: { persistSession: false },
     });
 
-    // 5) redirect do convite (IMPORTANTE)
-    // O link do email precisa voltar pra um lugar que finalize a sessão e mande pra tela de criar senha.
+    // 4) convite (redirect cai no /login e lá ele cria senha)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (!appUrl) {
       return NextResponse.json(
@@ -92,17 +100,15 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ manda pro callback (onde você troca tokens por sessão/cookies)
-    const redirectTo = `${appUrl}/auth/callback`;
+    const redirectTo = `${appUrl}/login?type=invite`;
 
-    // 6) Convida no Auth
     const { data: invited, error: inviteErr } =
-      await adminSupabase.auth.admin.inviteUserByEmail(email, {
+      await adminSupabase.auth.admin.inviteUserByEmail(body.email, {
         redirectTo,
         data: {
           role: "barber",
           barbershop_id: barbershopId,
-          name,
+          name: body.name,
         },
       });
 
@@ -121,46 +127,51 @@ export async function POST(req: Request) {
       );
     }
 
-    // 7) Garante profile do barbeiro
+    // 5) garante profiles do barbeiro
     const { error: upsertProfileErr } = await adminSupabase.from("profiles").upsert(
       {
         id: invitedUserId,
         role: "barber",
         barbershop_id: barbershopId,
-        name,
+        name: body.name,
       },
       { onConflict: "id" }
     );
 
     if (upsertProfileErr) {
       return NextResponse.json(
-        { error: `Convite ok, mas falhou criar profile: ${upsertProfileErr.message}` },
+        { error: `Convite ok, mas falhou profile: ${upsertProfileErr.message}` },
         { status: 400 }
       );
     }
 
-    // 8) Cria registro do barbeiro vinculado ao profile_id
-    // (se já existir por qualquer motivo, não quebra o fluxo)
-    const { error: insertBarberErr } = await adminSupabase.from("barbers").insert({
-      profile_id: invitedUserId,
-      name,
-      phone: phone ? onlyDigits(phone) : null,
-      active: true,
-      barbershop_id: barbershopId,
-    });
+    // 6) cria registro em barbers (vincula pelo profile_id)
+    // Obs: se já existir (reinvite), evitamos duplicar.
+    const { data: existingBarber, error: existingErr } = await adminSupabase
+      .from("barbers")
+      .select("id")
+      .eq("profile_id", invitedUserId)
+      .maybeSingle();
 
-    // Se der erro por duplicidade, tudo bem: já existe barber row
-    if (insertBarberErr) {
-      const msg = insertBarberErr.message.toLowerCase();
-      const isDup =
-        msg.includes("duplicate key") ||
-        msg.includes("already exists") ||
-        msg.includes("unique") ||
-        msg.includes("barbers_profile_id_unique");
+    if (existingErr) {
+      return NextResponse.json(
+        { error: `Falhou checar barbeiro: ${existingErr.message}` },
+        { status: 400 }
+      );
+    }
 
-      if (!isDup) {
+    if (!existingBarber?.id) {
+      const { error: insertBarberErr } = await adminSupabase.from("barbers").insert({
+        barbershop_id: barbershopId,
+        profile_id: invitedUserId,
+        name: body.name,
+        phone: body.phone ? onlyDigits(body.phone) : null,
+        active: true,
+      });
+
+      if (insertBarberErr) {
         return NextResponse.json(
-          { error: `Convite ok, mas falhou criar barbeiro: ${insertBarberErr.message}` },
+          { error: `Falhou criar barbeiro: ${insertBarberErr.message}` },
           { status: 400 }
         );
       }
@@ -168,8 +179,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      invited_email: email,
-      barber_name: name,
+      invited_email: body.email,
+      barber_user_id: invitedUserId,
+      barbershop_id: barbershopId,
+      redirectTo,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Erro inesperado.";
