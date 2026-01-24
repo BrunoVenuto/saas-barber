@@ -145,7 +145,7 @@ export default function AgendarPremiumPage() {
   const SERVICES_IMG =
     "https://images.unsplash.com/photo-1599351431202-1e0f0137899a?q=80&w=2400&auto=format&fit=crop";
   const MASTERS_IMG =
-    "https://images.unsplash.com/photo-1595476108010-b4d1f102b1b1?q=80&w=2400&auto=format&fit=crop";
+    "https://images.unsplash.com/photo-1596728325488-58c87691e9af?q=80&w=1173&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
 
   async function loadAll() {
     if (!slug) return;
