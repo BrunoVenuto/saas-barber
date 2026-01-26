@@ -39,12 +39,12 @@ async function getAppointment(id: string): Promise<Appointment | null> {
     id: data.id,
     client_name: data.client_name,
     client_phone: data.client_phone,
-    service_name: (data.services as { name: string }[] | null)?.[0]?.name,
+    service_name: (data.services as unknown as { name: string } | null)?.name,
     date: data.date,
     start_time: data.start_time,
     end_time: data.end_time,
     status: data.status,
-    barber_name: (data.barbers as { name: string }[] | null)?.[0]?.name,
+    barber_name: (data.barbers as unknown as { name: string } | null)?.name,
   };
 }
 
