@@ -20,6 +20,7 @@ type Barber = {
   name: string;
   barbershop_id: string | null;
   active?: boolean | null;
+  whatsapp: string | null;
 };
 
 type Service = {
@@ -136,6 +137,7 @@ export default function AgendarPremiumPage() {
   const [clientPhone, setClientPhone] = useState("");
 
   const [busy, setBusy] = useState<string[]>([]);
+  const [notifyLink, setNotifyLink] = useState<string | null>(null);
 
   // imagens (old school / madeira / barber vibes)
   const WOOD_BG =
@@ -171,7 +173,7 @@ export default function AgendarPremiumPage() {
       await Promise.all([
         supabase
           .from("barbers")
-          .select("id,name,barbershop_id,active")
+          .select("id,name,barbershop_id,active,whatsapp")
           .eq("barbershop_id", s.id)
           .eq("active", true)
           .order("name", { ascending: true }),
@@ -245,6 +247,7 @@ export default function AgendarPremiumPage() {
     setClientName("");
     setClientPhone("");
     setMsg(null);
+    setNotifyLink(null);
   }, [date, barberId, serviceId]);
 
   // recarrega busy quando muda data/barbeiro
@@ -336,7 +339,7 @@ export default function AgendarPremiumPage() {
 
     setSubmitting(true);
 
-    const { error } = await supabase.from("appointments").insert({
+    const { data, error } = await supabase.from("appointments").insert({
       barber_id: barberId,
       service_id: serviceId,
       client_id: null,
@@ -346,7 +349,7 @@ export default function AgendarPremiumPage() {
       status: "pending",
       client_name: name,
       client_phone: phone,
-    });
+    }).select("id").single();
 
     if (error) {
       setMsg("Erro ao criar agendamento: " + error.message);
@@ -358,6 +361,17 @@ export default function AgendarPremiumPage() {
     setBusy((prev) => uniqSorted([...(prev || []), selectedTime]));
 
     setMsg("✅ Pedido enviado! O barbeiro vai confirmar pelo WhatsApp.");
+
+    // Notificar barbeiro via WhatsApp
+    const selectedBarber = barbers.find(b => b.id === barberId);
+    if (selectedBarber?.whatsapp && data?.id) {
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const confirmUrl = `${baseUrl}/confirm/${data.id}`;
+      const message = `Novo agendamento pendente:\nCliente: ${name}\nServiço: ${selectedService?.name}\nData: ${date}\nHorário: ${selectedTime}\nPara confirmar, clique aqui: ${confirmUrl}`;
+      const link = waLink(selectedBarber.whatsapp) + '?text=' + encodeURIComponent(message);
+      setNotifyLink(link);
+    }
+
     setSubmitting(false);
 
     setSelectedTime("");
@@ -671,6 +685,19 @@ export default function AgendarPremiumPage() {
           {msg && (
             <div className="mt-5 rounded-2xl bg-black/40 border border-white/10 p-4 text-white/85">
               {msg}
+            </div>
+          )}
+
+          {notifyLink && (
+            <div className="mt-3">
+              <a
+                href={notifyLink}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center h-10 px-4 rounded-xl bg-emerald-500 text-black font-bold hover:brightness-110 transition"
+              >
+                Notificar barbeiro via WhatsApp
+              </a>
             </div>
           )}
 
