@@ -11,13 +11,16 @@ type Appointment = {
   end_time: string;
   status: string;
   barber_name?: string;
+  barber_whatsapp?: string | null; // ✅ vem do barbers.whatsapp
 };
 
 async function getAppointment(id: string): Promise<Appointment | null> {
   const supabase = createClient();
+
   const { data, error } = await supabase
     .from("appointments")
-    .select(`
+    .select(
+      `
       id,
       client_name,
       client_phone,
@@ -25,30 +28,41 @@ async function getAppointment(id: string): Promise<Appointment | null> {
       start_time,
       end_time,
       status,
-      services (name),
-      barbers (name)
-    `)
+      services:service_id ( name ),
+      barbers:barber_id ( name, whatsapp )
+    `
+    )
     .eq("id", id)
     .single();
 
-  if (error || !data) {
-    return null;
-  }
+  if (error || !data) return null;
+
+  const serviceName =
+    (data.services as { name?: string | null } | null)?.name ?? undefined;
+
+  const barberObj = data.barbers as
+    | { name?: string | null; whatsapp?: string | null }
+    | null;
 
   return {
     id: data.id,
     client_name: data.client_name,
     client_phone: data.client_phone,
-    service_name: (data.services as unknown as { name: string } | null)?.name,
+    service_name: serviceName,
     date: data.date,
     start_time: data.start_time,
     end_time: data.end_time,
     status: data.status,
-    barber_name: (data.barbers as unknown as { name: string } | null)?.name,
+    barber_name: barberObj?.name ?? undefined,
+    barber_whatsapp: barberObj?.whatsapp ?? null,
   };
 }
 
-export default async function ConfirmAppointmentPage({ params }: { params: { id: string } }) {
+export default async function ConfirmAppointmentPage({
+  params,
+}: {
+  params: { id: string };
+}) {
   const appointment = await getAppointment(params.id);
 
   if (!appointment) {

@@ -13,14 +13,13 @@ type Appointment = {
   date: string; // yyyy-mm-dd
   start_time: string; // HH:mm:ss or HH:mm
   end_time: string; // HH:mm:ss or HH:mm
-  // ✅ status final "done" (concluído) conforme constraint do banco
   status: "pending" | "confirmed" | "canceled" | "done" | string;
   client_name?: string | null;
   client_phone?: string | null;
   service_name?: string | null;
 };
 
-const CANCEL_MINUTES_NOTICE = 60; // antecedência mínima p/ permitir cancelamento
+const CANCEL_MINUTES_NOTICE = 60;
 
 function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
@@ -77,45 +76,52 @@ function statusLabel(s: string) {
   return s;
 }
 
-function buildWhatsAppUrlConfirm(ap: Appointment) {
+function buildWhatsAppUrlConfirm(ap: Appointment, barberName?: string) {
   const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
   if (!phone) return null;
 
   const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
-Confirmando seu agendamento:
-📅 ${ap.date}
-🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
-💈 ${ap.service_name || "Serviço"}
+Seu agendamento foi CONFIRMADO.
 
-Está tudo certo?`;
+📅 Data: ${ap.date}
+🕒 Horário: ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 Serviço: ${ap.service_name || "Serviço"}
+👤 Barbeiro: ${barberName || "—"}
+
+Se precisar ajustar algo, me chama por aqui. 🤝`;
 
   return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
 }
 
-function buildWhatsAppUrlCancel(ap: Appointment) {
+function buildWhatsAppUrlCancel(ap: Appointment, barberName?: string) {
   const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
   if (!phone) return null;
 
   const msg = `Olá, ${ap.client_name || "tudo bem?"}!
-⚠️ Precisamos cancelar seu agendamento.
+⚠️ Seu agendamento foi CANCELADO.
 
-📅 ${ap.date}
-🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
-💈 ${ap.service_name || "Serviço"}
+📅 Data: ${ap.date}
+🕒 Horário: ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 Serviço: ${ap.service_name || "Serviço"}
+👤 Barbeiro: ${barberName || "—"}
 
-Se quiser, me diga um novo horário que eu já remarco pra você. ✅`;
+Quer remarcar?
+Me diga:
+1) Dia
+2) Horário
+3) (Opcional) Serviço
+
+Que eu vejo um horário disponível e já remarco pra você. ✅`;
 
   return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
 }
 
 /**
- * 🔒 Anti pop-up block:
- * abre a aba IMEDIATAMENTE no clique (sem await antes).
- * Retorna a referência da janela (ou null se bloqueado).
+ * ✅ Abre WhatsApp em NOVA ABA e não redireciona a página atual.
+ * Retorna Window | null (null = popup bloqueado)
  */
 function openWhatsAppWindow(url: string) {
-  const w = window.open(url, "_blank", "noopener,noreferrer");
-  return w;
+  return window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export default function BarberDashboardPage() {
@@ -132,7 +138,6 @@ export default function BarberDashboardPage() {
 
   // --------------------------
   // Load barber linked to user
-  // ✅ usa barbers.profile_id (profile.id === user.id)
   // --------------------------
   useEffect(() => {
     (async () => {
@@ -221,7 +226,7 @@ export default function BarberDashboardPage() {
 
     const rows = Array.isArray(res.data) ? (res.data as AppointmentRowDb[]) : [];
 
-    // ✅ scheduled -> pending
+    // scheduled -> pending
     const mapped: Appointment[] = rows.map((a) => ({
       id: a.id,
       date: a.date,
@@ -244,27 +249,28 @@ export default function BarberDashboardPage() {
   }, [barber?.id, day]);
 
   // --------------------------
-  // API Status update (server)
+  // Actions
   // --------------------------
   async function confirmAppointment(ap: Appointment) {
     if (!barber) return;
 
+    console.log("[BARBER] confirm click", { apId: ap.id, phone: ap.client_phone });
+
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    // ✅ abre WhatsApp imediatamente (evita bloqueio)
-    const waUrl = buildWhatsAppUrlConfirm(ap);
+    // ✅ abre WhatsApp primeiro (sem await antes)
+    const waUrl = buildWhatsAppUrlConfirm(ap, barber.name);
     let waWin: Window | null = null;
 
     if (!waUrl) {
       alert("Esse agendamento não tem telefone do cliente.");
     } else {
       waWin = openWhatsAppWindow(waUrl);
+      console.log("[BARBER] confirm window.open", waWin);
+
       if (!waWin) {
-        // browser bloqueou popup
-        setStatusMsg(
-          "Seu navegador bloqueou a abertura do WhatsApp. Toque no botão 'WhatsApp' do card para abrir manualmente."
-        );
+        setStatusMsg("Seu navegador bloqueou pop-ups. Permita para este site.");
       }
     }
 
@@ -275,7 +281,6 @@ export default function BarberDashboardPage() {
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
-      // se a API falhar e a janela abriu, fecha para não confundir
       if (waWin && !waWin.closed) waWin.close();
       setStatusMsg("Erro ao confirmar: " + (json?.error || "Falha na API"));
       setUpdatingId(null);
@@ -291,6 +296,8 @@ export default function BarberDashboardPage() {
 
   async function cancelAppointment(ap: Appointment) {
     if (!barber) return;
+
+    console.log("[BARBER] cancel click", { apId: ap.id, phone: ap.client_phone });
 
     const mins = minutesUntil(ap);
     if (mins < CANCEL_MINUTES_NOTICE) {
@@ -309,18 +316,20 @@ export default function BarberDashboardPage() {
     setUpdatingId(ap.id);
     setStatusMsg(null);
 
-    // ✅ abre WhatsApp imediatamente (evita bloqueio)
-    const waUrl = buildWhatsAppUrlCancel(ap);
+    // ✅ abre WhatsApp antes do await
+    const waUrl = buildWhatsAppUrlCancel(ap, barber.name);
     let waWin: Window | null = null;
 
+    console.log("[BARBER] cancel waUrl", waUrl);
+
     if (!waUrl) {
-      alert("Esse agendamento não tem telefone do cliente.");
+      alert("Esse agendamento não tem telefone do cliente (ou está inválido).");
     } else {
       waWin = openWhatsAppWindow(waUrl);
+      console.log("[BARBER] cancel window.open", waWin);
+
       if (!waWin) {
-        setStatusMsg(
-          "Seu navegador bloqueou a abertura do WhatsApp. Toque no botão 'WhatsApp' do card para abrir manualmente."
-        );
+        setStatusMsg("Seu navegador bloqueou pop-ups. Permita para este site.");
       }
     }
 
@@ -347,6 +356,8 @@ export default function BarberDashboardPage() {
   async function completeAppointment(ap: Appointment) {
     if (!barber) return;
 
+    console.log("[BARBER] complete click", { apId: ap.id });
+
     const ok = confirm(
       `Marcar como CONCLUÍDO?\n\n${hhmm(ap.start_time)} • ${ap.client_name || "Cliente"}`
     );
@@ -367,7 +378,6 @@ export default function BarberDashboardPage() {
       return;
     }
 
-    // ✅ no banco é "done"
     setAppointments((prev) =>
       prev.map((a) => (a.id === ap.id ? { ...a, status: "done" } : a))
     );
@@ -376,7 +386,7 @@ export default function BarberDashboardPage() {
   }
 
   // --------------------------
-  // Summary (dia)
+  // Summary
   // --------------------------
   const summary = useMemo(() => {
     const total = appointments.length;
@@ -416,6 +426,7 @@ export default function BarberDashboardPage() {
               </div>
 
               <button
+                type="button"
                 onClick={() => barber && loadAppointments(day, barber.id)}
                 className="h-12 sm:h-[44px] sm:self-end px-5 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition"
               >
@@ -480,7 +491,7 @@ export default function BarberDashboardPage() {
 
               const canComplete = ap.status !== "canceled" && ap.status !== "done";
 
-              const waConfirmUrl = buildWhatsAppUrlConfirm(ap);
+              const waConfirmUrl = buildWhatsAppUrlConfirm(ap, barber?.name);
 
               return (
                 <div
@@ -547,6 +558,7 @@ export default function BarberDashboardPage() {
 
                     <div className="flex flex-wrap gap-2">
                       <button
+                        type="button"
                         disabled={
                           updatingId === ap.id ||
                           ap.status === "confirmed" ||
@@ -559,6 +571,7 @@ export default function BarberDashboardPage() {
                       </button>
 
                       <button
+                        type="button"
                         disabled={updatingId === ap.id || !canComplete}
                         onClick={() => completeAppointment(ap)}
                         className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"
@@ -567,6 +580,7 @@ export default function BarberDashboardPage() {
                       </button>
 
                       <button
+                        type="button"
                         disabled={updatingId === ap.id || !canCancel}
                         onClick={() => cancelAppointment(ap)}
                         className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-black transition disabled:opacity-50"
@@ -575,6 +589,7 @@ export default function BarberDashboardPage() {
                       </button>
 
                       <button
+                        type="button"
                         disabled={!waConfirmUrl}
                         onClick={() => {
                           if (!waConfirmUrl) {
@@ -582,10 +597,9 @@ export default function BarberDashboardPage() {
                             return;
                           }
                           const w = openWhatsAppWindow(waConfirmUrl);
+                          console.log("[BARBER] manual whatsapp open", w);
                           if (!w) {
-                            setStatusMsg(
-                              "Seu navegador bloqueou a abertura do WhatsApp. Permita pop-ups ou use outro navegador."
-                            );
+                            setStatusMsg("Seu navegador bloqueou pop-ups. Permita para este site.");
                           }
                         }}
                         className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"

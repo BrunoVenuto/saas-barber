@@ -49,6 +49,52 @@ function todayYmd() {
   return `${y}-${m}-${day}`;
 }
 
+/** ✅ Abre WhatsApp em nova aba (sem redirecionar). Retorna Window|null */
+function openWhatsAppUrl(url: string) {
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  return w;
+}
+
+function buildWaUrlConfirm(ap: AppointmentUI) {
+  const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
+  if (!phone) return null;
+
+  const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
+Seu agendamento foi CONFIRMADO.
+
+📅 Data: ${ap.date}
+🕒 Horário: ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 Serviço: ${ap.services?.name || "Serviço"}
+💈 Barbeiro: ${ap.barbers?.name || "—"}
+
+Se precisar ajustar algo, me chama por aqui. 🤝`;
+
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
+
+function buildWaUrlCancel(ap: AppointmentUI) {
+  const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
+  if (!phone) return null;
+
+  const msg = `Olá, ${ap.client_name || "tudo bem?"}!
+⚠️ Seu agendamento foi CANCELADO.
+
+📅 Data: ${ap.date}
+🕒 Horário: ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
+💈 Serviço: ${ap.services?.name || "Serviço"}
+💈 Barbeiro: ${ap.barbers?.name || "—"}
+
+Quer remarcar?
+Me diga:
+1) Dia
+2) Horário
+3) (Opcional) Serviço
+
+Que eu vejo um horário disponível e já remarco pra você. ✅`;
+
+  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+}
+
 export default function AdminAgendaPage() {
   const supabase = createClient();
 
@@ -136,7 +182,7 @@ export default function AdminAgendaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barbershopId]);
 
-  // 2) Load appointments (evita relacionamento embutido)
+  // 2) Load appointments
   async function loadAppointments() {
     if (!barbershopId) return;
 
@@ -145,7 +191,6 @@ export default function AdminAgendaPage() {
 
     const barberIds = barbers.map((b) => b.id);
 
-    // Se ainda não carregou barbeiros, ou barbearia sem barbeiros
     if (barberIds.length === 0) {
       setAppointments([]);
       setLoading(false);
@@ -175,7 +220,6 @@ export default function AdminAgendaPage() {
 
     const rows: AppointmentRow[] = (data ?? []) as AppointmentRow[];
 
-    // Buscar serviços (para nome/duração)
     const serviceIds = Array.from(
       new Set(rows.map((r) => r.service_id).filter(Boolean) as string[])
     );
@@ -198,11 +242,9 @@ export default function AdminAgendaPage() {
       }
     }
 
-    // Map de barbeiros
     const barbersMap = new Map<string, Barber>();
     barbers.forEach((b) => barbersMap.set(b.id, b));
 
-    // Monta UI
     const ui: AppointmentUI[] = rows.map((r) => {
       const b = barbersMap.get(r.barber_id);
       const s = r.service_id ? servicesMap.get(r.service_id) : null;
@@ -218,31 +260,34 @@ export default function AdminAgendaPage() {
     setLoading(false);
   }
 
-  // Recarrega quando muda filtros ou quando lista de barbeiros chega
   useEffect(() => {
     if (!barbershopId) return;
     loadAppointments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barbershopId, barbers, barberId, date, status]);
 
-  function openWhatsApp(ap: AppointmentUI) {
-    const phone = ap.client_phone ? toWhatsAppDigits(ap.client_phone) : "";
-    if (!phone) {
+  /** ✅ Abre WhatsApp de acordo com ação */
+  function openWhatsApp(ap: AppointmentUI, kind: "confirm" | "cancel") {
+    const url = kind === "confirm" ? buildWaUrlConfirm(ap) : buildWaUrlCancel(ap);
+
+    console.log("[ADMIN/AGENDA] openWhatsApp", { kind, apId: ap.id, url });
+
+    if (!url) {
       alert("Esse agendamento não tem telefone do cliente.");
       return false;
     }
 
-    const msg = `Olá, ${ap.client_name || "tudo bem?"}! ✅
-Confirmando seu agendamento:
-📅 ${ap.date}
-🕒 ${hhmm(ap.start_time)} - ${hhmm(ap.end_time)}
-💈 ${ap.services?.name || "Serviço"}
-Barbeiro: ${ap.barbers?.name || "—"}
+    const w = openWhatsAppUrl(url);
+    console.log("[ADMIN/AGENDA] window.open result:", w);
 
-Está tudo certo?`;
+    if (!w) {
+      // popup bloqueado
+      setTimeout(() => {
+        alert("Seu navegador bloqueou a abertura do WhatsApp. Permita pop-ups para este site.");
+      }, 0);
+      return false;
+    }
 
-    // ⚠️ tem que abrir no clique do usuário, senão o browser bloqueia popup
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
     return true;
   }
 
@@ -252,9 +297,12 @@ Está tudo certo?`;
     newStatus: "confirmed" | "done" | "canceled",
     opts?: { openWhatsApp?: boolean }
   ) {
-    // 1) abre WhatsApp ANTES para não ser bloqueado
+    console.log("[ADMIN/AGENDA] updateStatus click", { apId: ap.id, newStatus, opts });
+
+    // ✅ abre WhatsApp ANTES para não ser bloqueado
     if (opts?.openWhatsApp) {
-      openWhatsApp(ap);
+      if (newStatus === "confirmed") openWhatsApp(ap, "confirm");
+      if (newStatus === "canceled") openWhatsApp(ap, "cancel");
     }
 
     setUpdatingId(ap.id);
@@ -303,6 +351,7 @@ Está tudo certo?`;
           </div>
 
           <button
+            type="button"
             onClick={loadAppointments}
             disabled={!barbershopId}
             className="px-6 py-3 rounded-xl bg-yellow-400 text-black font-black hover:scale-[1.02] transition disabled:opacity-50"
@@ -432,20 +481,17 @@ Está tudo certo?`;
                       <span className="text-zinc-500">•</span>
 
                       <span
-                        className={`
-                          font-black
-                          ${
-                            ap.status === "confirmed"
-                              ? "text-green-400"
-                              : ap.status === "pending" || ap.status === "scheduled"
-                              ? "text-yellow-300"
-                              : ap.status === "done"
-                              ? "text-emerald-300"
-                              : ap.status === "canceled"
-                              ? "text-red-400"
-                              : "text-zinc-300"
-                          }
-                        `}
+                        className={`font-black ${
+                          ap.status === "confirmed"
+                            ? "text-green-400"
+                            : ap.status === "pending" || ap.status === "scheduled"
+                            ? "text-yellow-300"
+                            : ap.status === "done"
+                            ? "text-emerald-300"
+                            : ap.status === "canceled"
+                            ? "text-red-400"
+                            : "text-zinc-300"
+                        }`}
                       >
                         {ap.status === "scheduled" ? "pending" : ap.status}
                       </span>
@@ -465,6 +511,7 @@ Está tudo certo?`;
 
                   <div className="flex flex-wrap gap-2">
                     <button
+                      type="button"
                       disabled={updatingId === ap.id}
                       onClick={() => updateStatus(ap, "confirmed", { openWhatsApp: true })}
                       className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-black transition disabled:opacity-50"
@@ -473,6 +520,7 @@ Está tudo certo?`;
                     </button>
 
                     <button
+                      type="button"
                       disabled={updatingId === ap.id}
                       onClick={() => updateStatus(ap, "done")}
                       className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"
@@ -480,16 +528,19 @@ Está tudo certo?`;
                       Concluir
                     </button>
 
+                    {/* ✅ AQUI está a correção: abrir WhatsApp no cancelamento */}
                     <button
+                      type="button"
                       disabled={updatingId === ap.id}
-                      onClick={() => updateStatus(ap, "canceled")}
+                      onClick={() => updateStatus(ap, "canceled", { openWhatsApp: true })}
                       className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-black transition disabled:opacity-50"
                     >
                       Cancelar
                     </button>
 
                     <button
-                      onClick={() => openWhatsApp(ap)}
+                      type="button"
+                      onClick={() => openWhatsApp(ap, "confirm")}
                       className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition"
                     >
                       WhatsApp
