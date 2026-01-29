@@ -25,6 +25,10 @@ type WorkingHour = {
   end_time: string;
 };
 
+type BusyRow = {
+  start_time: string;
+};
+
 function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
 }
@@ -74,8 +78,13 @@ export default function ReschedulePage() {
   const token = (search.get("token") || "").trim();
 
   const [loading, setLoading] = useState(true);
+  const [busyLoading, setBusyLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgMode, setMsgMode] = useState<
+    "info" | "success" | "warning" | "error"
+  >("info");
 
   const [appt, setAppt] = useState<Appointment | null>(null);
   const [hours, setHours] = useState<WorkingHour[]>([]);
@@ -90,9 +99,12 @@ export default function ReschedulePage() {
     async function load() {
       setLoading(true);
       setMsg(null);
+      setSelectedTime("");
+      setDate("");
 
       if (!id || !tokenOk) {
-        setMsg("Link inválido.");
+        setMsgMode("error");
+        setMsg("Link inválido (id/token ausente).");
         setLoading(false);
         return;
       }
@@ -107,19 +119,29 @@ export default function ReschedulePage() {
         .single();
 
       if (error || !data) {
-        setMsg("Link inválido ou já usado.");
+        setMsgMode("warning");
+        setMsg("Link inválido ou já utilizado.");
         setLoading(false);
         return;
       }
 
-      setAppt(data as Appointment);
+      const a = data as Appointment;
+      setAppt(a);
 
-      const { data: hData } = await supabase
+      // pré-seleciona a data atual do agendamento pra facilitar
+      setDate(a.date || "");
+
+      const { data: hData, error: hErr } = await supabase
         .from("working_hours")
         .select("id,barber_id,weekday,start_time,end_time")
-        .eq("barber_id", data.barber_id);
+        .eq("barber_id", a.barber_id);
 
-      setHours(Array.isArray(hData) ? hData : []);
+      if (hErr) {
+        setMsgMode("warning");
+        setMsg("Não consegui carregar horários de trabalho do barbeiro.");
+      }
+
+      setHours(Array.isArray(hData) ? (hData as WorkingHour[]) : []);
       setLoading(false);
     }
 
@@ -130,36 +152,57 @@ export default function ReschedulePage() {
   async function loadBusy(d: string) {
     if (!appt?.barber_id || !d) return;
 
-    const { data } = await supabase
+    setBusyLoading(true);
+    setMsg(null);
+
+    const { data, error } = await supabase
       .from("appointments")
-      .select("start_time,status")
+      .select("start_time")
       .eq("date", d)
       .eq("barber_id", appt.barber_id)
       .neq("id", appt.id)
-      .neq("status", "canceled");
+      .neq("status", "canceled")
+      .order("start_time", { ascending: true });
 
-    const reserved = (data || []).map((x: { start_time: string }) =>
-      toHHMM(x.start_time),
-    );
+    if (error) {
+      setBusy([]);
+      setBusyLoading(false);
+      setMsgMode("warning");
+      setMsg("Não consegui carregar horários ocupados.");
+      return;
+    }
+
+    const reserved = ((data as BusyRow[]) || [])
+      .map((x) => toHHMM(x.start_time))
+      .filter(Boolean);
     setBusy(uniqSorted(reserved));
+    setBusyLoading(false);
   }
 
   useEffect(() => {
-    if (date) loadBusy(date);
+    if (!date) {
+      setBusy([]);
+      setSelectedTime("");
+      return;
+    }
+    setSelectedTime("");
+    loadBusy(date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
   const slots = useMemo(() => {
-    if (!date || !hours.length) return [];
+    if (!date || hours.length === 0) return [];
 
     const wd = new Date(date + "T00:00:00").getDay();
     const relevant = hours.filter((h) => Number(h.weekday) === wd);
 
     const all: string[] = [];
+    const slotMinutes = 60; // padrão aqui (pode evoluir depois pelo service.duration)
+
     for (const h of relevant) {
       const start = hhmmToMinutes(toHHMM(h.start_time));
       const end = hhmmToMinutes(toHHMM(h.end_time));
-      for (let t = start; t + 60 <= end; t += 60) {
+      for (let t = start; t + slotMinutes <= end; t += slotMinutes) {
         all.push(minutesToHHMM(t));
       }
     }
@@ -169,105 +212,212 @@ export default function ReschedulePage() {
   }, [date, hours, busy]);
 
   async function handleSave() {
-    if (!appt || !date || !selectedTime) return;
+    if (!appt) return;
 
-    setSaving(true);
     setMsg(null);
 
-    const end_time = minutesToHHMM(hhmmToMinutes(selectedTime) + 60);
+    if (!date) {
+      setMsgMode("warning");
+      setMsg("Selecione uma data.");
+      return;
+    }
+    if (!selectedTime) {
+      setMsgMode("warning");
+      setMsg("Selecione um horário.");
+      return;
+    }
 
+    setSaving(true);
+
+    const slotMinutes = 60;
+    const end_time = minutesToHHMM(hhmmToMinutes(selectedTime) + slotMinutes);
+
+    // ✅ FIX: NÃO muda status para reschedule_requested (pois o CHECK não permite)
+    // Mantém como "pending" para o cliente poder Confirmar/Recusar normalmente.
     const { error } = await supabase
       .from("appointments")
       .update({
         date,
         start_time: selectedTime,
         end_time,
-        status: "reschedule_requested",
+        status: "pending",
       })
       .eq("id", appt.id)
       .eq("action_token", token);
 
     if (error) {
+      setMsgMode("error");
       setMsg("Erro ao salvar: " + error.message);
       setSaving(false);
       return;
     }
 
-    // ✅ AQUI ESTÁ O PONTO CRÍTICO: LINKS COM TOKEN
+    // ✅ Links pro cliente SEMPRE com token
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    const clientToken = appt.action_token || "";
 
-    const clientConfirmUrl = `${baseUrl}/confirm/${appt.id}?token=${appt.action_token}`;
-    const clientDeclineUrl = `${baseUrl}/decline/${appt.id}?token=${appt.action_token}`;
+    const clientConfirmUrl = `${baseUrl}/confirm/${appt.id}?token=${clientToken}`;
+    const clientDeclineUrl = `${baseUrl}/decline/${appt.id}?token=${clientToken}`;
 
     const message =
-      `Olá ${appt.client_name || ""}, o barbeiro sugeriu um novo horário:\n\n` +
+      `Novo horário sugerido\n\n` +
+      `Cliente: ${appt.client_name || "—"}\n` +
       `Data: ${date}\n` +
       `Horário: ${selectedTime}\n\n` +
-      `Você pode:\n` +
       `Confirmar: ${clientConfirmUrl}\n` +
       `Recusar: ${clientDeclineUrl}`;
 
     const wa = waLink(appt.client_phone || null);
-    if (wa) {
-      window.open(`${wa}?text=${encodeURIComponent(message)}`, "_blank");
+    if (!wa) {
+      setMsgMode("warning");
+      setMsg("Sugestão salva, mas o WhatsApp do cliente não está cadastrado.");
+      setSaving(false);
+      return;
     }
 
-    setMsg("Sugestão enviada ao cliente pelo WhatsApp.");
+    window.open(`${wa}?text=${encodeURIComponent(message)}`, "_blank");
+
+    setMsgMode("success");
+    setMsg("Sugestão salva e enviada ao cliente pelo WhatsApp.");
     setSaving(false);
   }
 
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-xl rounded-[28px] border border-white/10 bg-black/40 backdrop-blur-md p-6">
-        <h1 className="text-2xl font-black">Sugerir novo horário</h1>
+      <div className="w-full max-w-xl rounded-[28px] border border-white/10 bg-black/40 backdrop-blur-md shadow-[0_25px_90px_rgba(0,0,0,0.65)] overflow-hidden">
+        <div className="p-6 sm:p-8 border-b border-white/10">
+          <p className="text-xs tracking-[0.22em] font-black text-white/60">
+            BARBEIRO
+          </p>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-black">
+            Sugerir novo horário
+          </h1>
+          <p className="mt-2 text-white/65 text-sm">
+            Escolha uma data e um horário livre. O cliente recebe os links para
+            confirmar ou recusar.
+          </p>
+        </div>
 
-        {loading ? (
-          <p className="mt-4 text-white/70">Carregando...</p>
-        ) : (
-          <>
-            {msg && (
-              <div className="mt-4 p-3 rounded-xl bg-white/10">{msg}</div>
-            )}
-
-            <div className="mt-4">
-              <label className="text-sm font-bold">Nova data</label>
-              <input
-                type="date"
-                className="w-full mt-2 bg-black/40 border border-white/10 rounded-xl px-3 py-3"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
+        <div className="p-6 sm:p-8">
+          {loading ? (
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white/70">
+              Carregando...
             </div>
+          ) : (
+            <>
+              {msg && (
+                <div
+                  className={clsx(
+                    "rounded-2xl border p-4",
+                    msgMode === "success" &&
+                      "bg-emerald-500/10 border-emerald-400/30 text-emerald-200",
+                    msgMode === "warning" &&
+                      "bg-yellow-500/10 border-yellow-400/30 text-yellow-200",
+                    msgMode === "error" &&
+                      "bg-red-500/10 border-red-400/30 text-red-200",
+                    msgMode === "info" &&
+                      "bg-white/5 border-white/10 text-white/80",
+                  )}
+                >
+                  <p className="font-bold">Aviso</p>
+                  <p className="text-sm mt-1">{msg}</p>
+                </div>
+              )}
 
-            <div className="mt-4">
-              <p className="text-sm font-bold">Horários disponíveis</p>
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                {slots.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setSelectedTime(t)}
-                    className={clsx(
-                      "h-10 rounded-xl font-bold",
-                      selectedTime === t
-                        ? "bg-yellow-400 text-black"
-                        : "bg-white/10",
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
+              <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-xs text-white/55">Agendamento atual</p>
+                <p className="mt-2 text-white/85">
+                  <span className="text-white/55">Cliente:</span>{" "}
+                  <span className="font-bold">{appt?.client_name || "—"}</span>
+                </p>
+                <p className="text-white/85">
+                  <span className="text-white/55">Data:</span>{" "}
+                  <span className="font-bold">{appt?.date || "—"}</span>
+                </p>
+                <p className="text-white/85">
+                  <span className="text-white/55">Horário:</span>{" "}
+                  <span className="font-bold">
+                    {toHHMM(appt?.start_time)}
+                    {appt?.end_time ? ` - ${toHHMM(appt?.end_time)}` : ""}
+                  </span>
+                </p>
               </div>
-            </div>
 
-            <button
-              disabled={!date || !selectedTime || saving}
-              onClick={handleSave}
-              className="mt-6 w-full h-12 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
-            >
-              {saving ? "Enviando..." : "Enviar sugestão ao cliente"}
-            </button>
-          </>
-        )}
+              <div className="mt-5">
+                <label className="text-sm font-bold text-white/80">
+                  Nova data
+                </label>
+                <input
+                  type="date"
+                  className="w-full mt-2 bg-black/40 border border-white/10 rounded-2xl px-3 py-3 outline-none"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+                {busyLoading && (
+                  <p className="mt-2 text-xs text-white/55">
+                    Verificando horários ocupados...
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-5">
+                <p className="text-sm font-bold text-white/80">
+                  Horários livres
+                </p>
+
+                {!date ? (
+                  <p className="mt-2 text-white/55">
+                    Selecione uma data para ver os horários.
+                  </p>
+                ) : busyLoading ? (
+                  <p className="mt-2 text-white/55">Carregando horários...</p>
+                ) : slots.length === 0 ? (
+                  <p className="mt-2 text-white/55">
+                    Nenhum horário disponível nesse dia.
+                  </p>
+                ) : (
+                  <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {slots.map((t) => {
+                      const selected = selectedTime === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setSelectedTime(t)}
+                          className={clsx(
+                            "h-11 rounded-2xl font-black border transition",
+                            selected
+                              ? "bg-yellow-400 text-black border-yellow-300"
+                              : "bg-white/5 text-white/85 border-white/10 hover:bg-white/10",
+                          )}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleSave}
+                disabled={!date || !selectedTime || saving}
+                className={clsx(
+                  "mt-6 w-full h-12 rounded-2xl font-black text-black transition",
+                  "bg-yellow-400 hover:brightness-110 disabled:opacity-50 disabled:hover:brightness-100",
+                  "shadow-[0_0_0_1px_rgba(255,220,120,0.35),0_18px_55px_rgba(0,0,0,0.65)]",
+                )}
+              >
+                {saving ? "Enviando..." : "Salvar e enviar ao cliente"}
+              </button>
+
+              <p className="mt-4 text-[11px] text-white/45 text-center">
+                O cliente vai receber os links para confirmar ou recusar. (Links
+                sempre com token.)
+              </p>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
