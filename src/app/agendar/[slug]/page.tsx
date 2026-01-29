@@ -21,6 +21,7 @@ type Barber = {
   barbershop_id: string | null;
   active?: boolean | null;
   whatsapp: string | null;
+  phone?: string | null;
 };
 
 type Service = {
@@ -46,6 +47,11 @@ type BusyAppointment = {
   status: string | null;
 };
 
+type InsertedAppointment = {
+  id: string;
+  action_token: string | null;
+};
+
 const DAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 function onlyDigits(v: string) {
@@ -53,7 +59,8 @@ function onlyDigits(v: string) {
 }
 
 function waLink(raw: string | null) {
-  const d = onlyDigits(raw || "");
+  const d0 = onlyDigits(raw || "");
+  const d = d0.replace(/^0+/, "");
   if (!d) return null;
   const final = d.startsWith("55") ? d : `55${d}`;
   return `https://wa.me/${final}`;
@@ -109,7 +116,45 @@ function minutesToHHMM(min: number) {
 }
 
 function uniqSorted(arr: string[]) {
-  return Array.from(new Set(arr)).sort((a, b) => hhmmToMinutes(a) - hhmmToMinutes(b));
+  return Array.from(new Set(arr)).sort(
+    (a, b) => hhmmToMinutes(a) - hhmmToMinutes(b),
+  );
+}
+
+/**
+ * Gera UUID v4 sem usar any, com fallback caso randomUUID não exista.
+ */
+function createActionToken(): string {
+  const g = globalThis;
+  const c = g.crypto;
+
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
+  }
+
+  if (c && typeof c.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    c.getRandomValues(bytes);
+
+    // v4
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  // Último fallback (muito raro)
+  const s = `${Date.now()}-${Math.random()}-${Math.random()}`.replace(
+    /\./g,
+    "",
+  );
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-4${s.slice(12, 15)}-8${s.slice(15, 18)}-${s.slice(18, 30)}`.padEnd(
+    36,
+    "0",
+  );
 }
 
 export default function AgendarPremiumPage() {
@@ -139,7 +184,7 @@ export default function AgendarPremiumPage() {
   const [busy, setBusy] = useState<string[]>([]);
   const [notifyLink, setNotifyLink] = useState<string | null>(null);
 
-  // imagens (old school / madeira / barber vibes)
+  // imagens
   const WOOD_BG =
     "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?q=80&w=2400&auto=format&fit=crop";
   const HERO_IMG =
@@ -169,37 +214,42 @@ export default function AgendarPremiumPage() {
 
     setShop(s as Shop);
 
-    const [{ data: bData, error: bErr }, { data: svData, error: svErr }, { data: hData, error: hErr }] =
-      await Promise.all([
-        supabase
-          .from("barbers")
-          .select("id,name,barbershop_id,active,whatsapp")
-          .eq("barbershop_id", s.id)
-          .eq("active", true)
-          .order("name", { ascending: true }),
+    const [
+      { data: bData, error: bErr },
+      { data: svData, error: svErr },
+      { data: hData, error: hErr },
+    ] = await Promise.all([
+      supabase
+        .from("barbers")
+        .select("id,name,barbershop_id,active,whatsapp,phone")
+        .eq("barbershop_id", s.id)
+        .eq("active", true)
+        .order("name", { ascending: true }),
 
-        supabase
-          .from("services")
-          .select("id,name,barbershop_id,price,duration_minutes,active")
-          .eq("barbershop_id", s.id)
-          .order("name", { ascending: true }),
+      supabase
+        .from("services")
+        .select("id,name,barbershop_id,price,duration_minutes,active")
+        .eq("barbershop_id", s.id)
+        .order("name", { ascending: true }),
 
-        supabase
-          .from("working_hours")
-          .select("id,barbershop_id,barber_id,weekday,start_time,end_time")
-          .eq("barbershop_id", s.id)
-          .order("weekday", { ascending: true })
-          .order("start_time", { ascending: true }),
-      ]);
+      supabase
+        .from("working_hours")
+        .select("id,barbershop_id,barber_id,weekday,start_time,end_time")
+        .eq("barbershop_id", s.id)
+        .order("weekday", { ascending: true })
+        .order("start_time", { ascending: true }),
+    ]);
 
-    if (bErr) setMsg((prev) => prev || "Erro ao carregar barbeiros: " + bErr.message);
-    if (svErr) setMsg((prev) => prev || "Erro ao carregar serviços: " + svErr.message);
-    if (hErr) setMsg((prev) => prev || "Erro ao carregar horários: " + hErr.message);
+    if (bErr)
+      setMsg((prev) => prev || "Erro ao carregar barbeiros: " + bErr.message);
+    if (svErr)
+      setMsg((prev) => prev || "Erro ao carregar serviços: " + svErr.message);
+    if (hErr)
+      setMsg((prev) => prev || "Erro ao carregar horários: " + hErr.message);
 
     setBarbers(Array.isArray(bData) ? bData : []);
     setServices(Array.isArray(svData) ? svData : []);
     setHours(Array.isArray(hData) ? hData : []);
-
 
     setLoading(false);
   }
@@ -241,7 +291,6 @@ export default function AgendarPremiumPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  // sempre que mudar filtros, limpa seleção e campos
   useEffect(() => {
     setSelectedTime("");
     setClientName("");
@@ -250,7 +299,6 @@ export default function AgendarPremiumPage() {
     setNotifyLink(null);
   }, [date, barberId, serviceId]);
 
-  // recarrega busy quando muda data/barbeiro
   useEffect(() => {
     if (!date || !barberId) {
       setBusy([]);
@@ -282,7 +330,6 @@ export default function AgendarPremiumPage() {
 
       // aceita horário geral (barber_id null) + do barbeiro
       if (h.barber_id && h.barber_id !== barberId) return false;
-
       return true;
     });
   }, [date, barberId, shop, hours]);
@@ -320,11 +367,11 @@ export default function AgendarPremiumPage() {
     const name = clientName.trim();
     const phone = onlyDigits(clientPhone);
 
-    if (name.length < 2) return setMsg("Informe seu nome (mínimo 2 caracteres).");
+    if (name.length < 2)
+      return setMsg("Informe seu nome (mínimo 2 caracteres).");
     if (phone.length < 10 || phone.length > 15)
       return setMsg("Informe seu WhatsApp (somente números, 10 a 15 dígitos).");
 
-    // se alguém reservou enquanto você estava na tela
     if (busy.includes(selectedTime)) {
       setMsg("Esse horário acabou de ser reservado. Escolha outro.");
       setSelectedTime("");
@@ -339,17 +386,25 @@ export default function AgendarPremiumPage() {
 
     setSubmitting(true);
 
-    const { data, error } = await supabase.from("appointments").insert({
-      barber_id: barberId,
-      service_id: serviceId,
-      client_id: null,
-      date,
-      start_time,
-      end_time,
-      status: "pending",
-      client_name: name,
-      client_phone: phone,
-    }).select("id").single();
+    // ✅ Correção 2: gerar token no front e salvar no insert
+    const actionToken = createActionToken();
+
+    const { data, error } = await supabase
+      .from("appointments")
+      .insert({
+        barber_id: barberId,
+        service_id: serviceId,
+        client_id: null,
+        date,
+        start_time,
+        end_time,
+        status: "pending",
+        client_name: name,
+        client_phone: phone,
+        action_token: actionToken,
+      })
+      .select("id,action_token")
+      .single();
 
     if (error) {
       setMsg("Erro ao criar agendamento: " + error.message);
@@ -357,19 +412,44 @@ export default function AgendarPremiumPage() {
       return;
     }
 
-    // remove o slot imediatamente da tela
-    setBusy((prev) => uniqSorted([...(prev || []), selectedTime]));
+    const inserted = (data as InsertedAppointment | null) || null;
+    const appointmentId = inserted?.id || null;
+    const tokenToUse = inserted?.action_token || actionToken;
 
+    setBusy((prev) => uniqSorted([...(prev || []), selectedTime]));
     setMsg("✅ Pedido enviado! O barbeiro vai confirmar pelo WhatsApp.");
 
-    // Notificar barbeiro via WhatsApp
-    const selectedBarber = barbers.find(b => b.id === barberId);
-    if (selectedBarber?.whatsapp && data?.id) {
-      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      const confirmUrl = `${baseUrl}/confirm/${data.id}`;
-      const message = `Novo agendamento pendente:\nCliente: ${name}\nServiço: ${selectedService?.name}\nData: ${date}\nHorário: ${selectedTime}\nPara confirmar, clique aqui: ${confirmUrl}`;
-      const link = waLink(selectedBarber.whatsapp) + '?text=' + encodeURIComponent(message);
+    // Notificar barbeiro via WhatsApp (usa whatsapp OU phone)
+    const selectedBarber = barbers.find((b) => b.id === barberId);
+    const barberContact =
+      selectedBarber?.whatsapp || selectedBarber?.phone || null;
+
+    if (barberContact && appointmentId) {
+      const baseUrl =
+        typeof window !== "undefined" ? window.location.origin : "";
+
+      const confirmUrl = `${baseUrl}/confirm/${appointmentId}?token=${encodeURIComponent(tokenToUse)}`;
+      const declineUrl = `${baseUrl}/decline/${appointmentId}?token=${encodeURIComponent(tokenToUse)}`;
+      const rescheduleUrl = `${baseUrl}/reschedule/${appointmentId}?token=${encodeURIComponent(tokenToUse)}`;
+
+      const message =
+        `*Novo agendamento pendente*\n\n` +
+        `- Cliente: ${name}\n` +
+        `- Serviço: ${selectedService?.name || "—"}\n` +
+        `- Data: ${date}\n` +
+        `- Horário: ${selectedTime}\n\n` +
+        `Ações:\n` +
+        `Confirmar: ${confirmUrl}\n` +
+        `Cancelar: ${declineUrl}\n` +
+        `Sugerir outro horário: ${rescheduleUrl}`;
+
+
+      const base = waLink(barberContact);
+      const link = base ? `${base}?text=${encodeURIComponent(message)}` : null;
+
       setNotifyLink(link);
+    } else {
+      setNotifyLink(null);
     }
 
     setSubmitting(false);
@@ -384,7 +464,7 @@ export default function AgendarPremiumPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-10">
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
         <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 w-full max-w-xl">
           <p className="text-zinc-300">Carregando...</p>
         </div>
@@ -394,7 +474,7 @@ export default function AgendarPremiumPage() {
 
   if (!shop) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-10">
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
         <div className="max-w-lg w-full bg-zinc-950 border border-white/10 rounded-2xl p-6">
           <h1 className="text-2xl font-black">Barbearia não encontrada</h1>
           <p className="text-zinc-400 mt-2">{msg || "Verifique o link."}</p>
@@ -422,7 +502,6 @@ export default function AgendarPremiumPage() {
         <div className="px-3 sm:px-6 lg:px-10 pt-3 sm:pt-4">
           <div className="mx-auto max-w-7xl rounded-[22px] border border-white/10 bg-black/40 backdrop-blur-md shadow-[0_20px_60px_rgba(0,0,0,0.65)]">
             <div className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3">
-              {/* LEFT: logo + titles */}
               <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                 <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center shrink-0">
                   <span className="text-yellow-200 font-black text-sm sm:text-base">
@@ -430,19 +509,16 @@ export default function AgendarPremiumPage() {
                   </span>
                 </div>
 
-                {/* ✅ No mobile NÃO truncar: deixa quebrar linha se precisar */}
                 <div className="min-w-0">
                   <p className="font-black tracking-tight text-sm sm:text-base leading-tight whitespace-normal break-words sm:truncate">
                     {shop.name}
                   </p>
-                  {/* Subtítulo só a partir de sm (tablet/desktop) */}
                   <p className="hidden sm:block text-[11px] text-white/60 -mt-0.5 truncate">
                     {shop.city || "Barbearia"} • Old School • Premium
                   </p>
                 </div>
               </div>
 
-              {/* DESKTOP: menu + agendar */}
               <div className="hidden md:flex items-center gap-6 shrink-0">
                 <nav className="flex items-center gap-6 text-sm text-white/75">
                   <a href="#sobre" className="hover:text-white transition">
@@ -473,7 +549,6 @@ export default function AgendarPremiumPage() {
                 </a>
               </div>
 
-              {/* MOBILE: hamburger menu (com Agendar dentro) */}
               <div className="md:hidden shrink-0">
                 <details className="relative">
                   <summary
@@ -486,7 +561,6 @@ export default function AgendarPremiumPage() {
                       "hover:bg-white/15 transition",
                     ].join(" ")}
                   >
-                    {/* Ícone hambúrguer */}
                     <span className="block w-5">
                       <span className="block h-[2px] w-5 bg-white/80 rounded" />
                       <span className="block h-[2px] w-5 bg-white/80 rounded mt-1.5" />
@@ -494,7 +568,6 @@ export default function AgendarPremiumPage() {
                     </span>
                   </summary>
 
-                  {/* Dropdown */}
                   <div className="absolute right-0 mt-3 w-[260px] rounded-2xl border border-white/10 bg-black/85 backdrop-blur-md shadow-[0_20px_60px_rgba(0,0,0,0.75)] overflow-hidden">
                     <div className="p-3">
                       <a
@@ -548,7 +621,6 @@ export default function AgendarPremiumPage() {
         </div>
       </header>
 
-
       {/* HERO */}
       <section className="px-4 sm:px-6 lg:px-10 pt-6 pb-10">
         <div className="mx-auto max-w-7xl">
@@ -579,8 +651,10 @@ export default function AgendarPremiumPage() {
                   </h1>
 
                   <p className="mt-4 text-white/80 text-base sm:text-lg leading-relaxed">
-                    Brutalidade. Estilo. Carisma. <br className="hidden sm:block" />
-                    Agende online em segundos — escolha o barbeiro, o serviço e o melhor horário.
+                    Brutalidade. Estilo. Carisma.{" "}
+                    <br className="hidden sm:block" />
+                    Agende online em segundos — escolha o barbeiro, o serviço e
+                    o melhor horário.
                   </p>
 
                   <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:items-center">
@@ -589,7 +663,7 @@ export default function AgendarPremiumPage() {
                       className={clsx(
                         "h-12 sm:h-14 px-6 rounded-2xl font-black text-black grid place-items-center",
                         "bg-yellow-400 hover:brightness-110 transition",
-                        "shadow-[0_0_0_1px_rgba(255,220,120,0.45),0_18px_60px_rgba(0,0,0,0.65)]"
+                        "shadow-[0_0_0_1px_rgba(255,220,120,0.45),0_18px_60px_rgba(0,0,0,0.65)]",
                       )}
                     >
                       Agendar
@@ -638,7 +712,9 @@ export default function AgendarPremiumPage() {
               <div className="grid md:grid-cols-3 gap-4">
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
                   <p className="text-xs text-white/60">Endereço</p>
-                  <p className="font-bold text-white/90">{shop.address || "—"}</p>
+                  <p className="font-bold text-white/90">
+                    {shop.address || "—"}
+                  </p>
                   <p className="text-sm text-white/70">{shop.city || ""}</p>
                 </div>
 
@@ -646,14 +722,18 @@ export default function AgendarPremiumPage() {
                   <p className="text-xs text-white/60">Telefone</p>
                   <p className="font-bold text-white/90">{shop.phone || "—"}</p>
                   <p className="text-sm text-white/70">
-                    {shop.whatsapp ? "WhatsApp disponível" : "WhatsApp não informado"}
+                    {shop.whatsapp
+                      ? "WhatsApp disponível"
+                      : "WhatsApp não informado"}
                   </p>
                 </div>
 
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
                   <p className="text-xs text-white/60">Agendamento</p>
                   <p className="font-bold text-white/90">Online</p>
-                  <p className="text-sm text-white/70">Escolha seu horário logo abaixo.</p>
+                  <p className="text-sm text-white/70">
+                    Escolha seu horário logo abaixo.
+                  </p>
                 </div>
               </div>
             </div>
@@ -661,7 +741,7 @@ export default function AgendarPremiumPage() {
         </div>
       </section>
 
-      {/* BOOKING (o agendamento funcionando, mas com o visual premium) */}
+      {/* BOOKING */}
       <section id="agendar" className="px-4 sm:px-6 lg:px-10 pb-10">
         <div className="mx-auto max-w-7xl rounded-[34px] border border-white/10 bg-black/30 backdrop-blur-md p-5 sm:p-7 shadow-[0_25px_80px_rgba(0,0,0,0.65)]">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
@@ -673,12 +753,15 @@ export default function AgendarPremiumPage() {
                 Agendar agora
               </h2>
               <p className="text-white/70 mt-2">
-                Selecione barbeiro, serviço e horário. Depois, informe seu WhatsApp.
+                Selecione barbeiro, serviço e horário. Depois, informe seu
+                WhatsApp.
               </p>
             </div>
 
             <div className="text-xs text-white/55">
-              {busyLoading ? "Verificando horários ocupados..." : "Horários atualizados automaticamente."}
+              {busyLoading
+                ? "Verificando horários ocupados..."
+                : "Horários atualizados automaticamente."}
             </div>
           </div>
 
@@ -694,16 +777,18 @@ export default function AgendarPremiumPage() {
                 href={notifyLink}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center h-10 px-4 rounded-xl bg-emerald-500 text-black font-bold hover:brightness-110 transition"
+                className="inline-flex items-center justify-center h-11 px-4 rounded-2xl bg-emerald-500 text-black font-black hover:brightness-110 transition w-full sm:w-auto"
               >
-                Notificar barbeiro via WhatsApp
+                Enviar para o WhatsApp do barbeiro
               </a>
             </div>
           )}
 
           <div className="mt-6 grid lg:grid-cols-3 gap-4">
             <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-              <label className="text-sm text-white/70 font-bold">Barbeiro</label>
+              <label className="text-sm text-white/70 font-bold">
+                Barbeiro
+              </label>
               <select
                 className="w-full mt-2 bg-black/40 border border-white/10 rounded-xl px-3 py-3 outline-none"
                 value={barberId}
@@ -718,7 +803,9 @@ export default function AgendarPremiumPage() {
               </select>
 
               {barbers.length === 0 && (
-                <p className="text-xs text-white/55 mt-2">Nenhum barbeiro ativo cadastrado.</p>
+                <p className="text-xs text-white/55 mt-2">
+                  Nenhum barbeiro ativo cadastrado.
+                </p>
               )}
             </div>
 
@@ -743,7 +830,9 @@ export default function AgendarPremiumPage() {
               {serviceId && (
                 <p className="text-xs text-white/55 mt-2">
                   Duração usada para slots:{" "}
-                  <span className="text-white/85 font-black">{slotMinutes} min</span>
+                  <span className="text-white/85 font-black">
+                    {slotMinutes} min
+                  </span>
                 </p>
               )}
             </div>
@@ -758,7 +847,10 @@ export default function AgendarPremiumPage() {
               />
               {!!date && (
                 <p className="text-xs text-white/55 mt-2">
-                  Dia: <span className="text-white/85 font-black">{DAYS[toWeekday(date)]}</span>
+                  Dia:{" "}
+                  <span className="text-white/85 font-black">
+                    {DAYS[toWeekday(date)]}
+                  </span>
                 </p>
               )}
             </div>
@@ -774,9 +866,13 @@ export default function AgendarPremiumPage() {
             ) : !date ? (
               <p className="text-white/55 mt-2">Selecione uma data.</p>
             ) : busyLoading ? (
-              <p className="text-white/55 mt-2">Carregando horários ocupados...</p>
+              <p className="text-white/55 mt-2">
+                Carregando horários ocupados...
+              </p>
             ) : slots.length === 0 ? (
-              <p className="text-white/55 mt-2">Nenhum horário disponível para essa data.</p>
+              <p className="text-white/55 mt-2">
+                Nenhum horário disponível para essa data.
+              </p>
             ) : (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                 {slots.map((t) => {
@@ -790,7 +886,7 @@ export default function AgendarPremiumPage() {
                         "h-11 rounded-2xl font-black transition border",
                         isSelected
                           ? "bg-yellow-400 text-black border-yellow-300"
-                          : "bg-emerald-600/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-600/30"
+                          : "bg-emerald-600/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-600/30",
                       )}
                     >
                       {t}
@@ -801,17 +897,19 @@ export default function AgendarPremiumPage() {
             )}
           </div>
 
-          {/* Dados do cliente */}
           {!!selectedTime && (
             <div className="mt-7 rounded-[28px] bg-black/35 border border-white/10 p-5">
               <p className="font-black text-white/90">Seus dados</p>
               <p className="text-sm text-white/60 mt-1">
-                Usaremos seu WhatsApp para confirmar o horário e falar sobre cancelamentos.
+                Usaremos seu WhatsApp para confirmar o horário e falar sobre
+                cancelamentos.
               </p>
 
               <div className="mt-4 grid md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm text-white/70 font-bold">Nome</label>
+                  <label className="text-sm text-white/70 font-bold">
+                    Nome
+                  </label>
                   <input
                     className="w-full mt-2 bg-black/40 border border-white/10 rounded-xl px-3 py-3 outline-none"
                     value={clientName}
@@ -821,7 +919,9 @@ export default function AgendarPremiumPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm text-white/70 font-bold">WhatsApp (só números)</label>
+                  <label className="text-sm text-white/70 font-bold">
+                    WhatsApp (só números)
+                  </label>
                   <input
                     className="w-full mt-2 bg-black/40 border border-white/10 rounded-xl px-3 py-3 outline-none"
                     value={clientPhone}
@@ -829,7 +929,9 @@ export default function AgendarPremiumPage() {
                     placeholder="DDD + número"
                     inputMode="numeric"
                   />
-                  <p className="text-xs text-white/50 mt-2">Exemplo: 31999999999</p>
+                  <p className="text-xs text-white/50 mt-2">
+                    Exemplo: 31999999999
+                  </p>
                 </div>
               </div>
             </div>
@@ -839,7 +941,7 @@ export default function AgendarPremiumPage() {
             className={clsx(
               "mt-6 w-full h-14 rounded-2xl font-black text-black transition",
               "bg-yellow-400 hover:brightness-110 disabled:opacity-50 disabled:hover:brightness-100",
-              "shadow-[0_0_0_1px_rgba(255,220,120,0.45),0_18px_60px_rgba(0,0,0,0.65)]"
+              "shadow-[0_0_0_1px_rgba(255,220,120,0.45),0_18px_60px_rgba(0,0,0,0.65)]",
             )}
             disabled={
               submitting ||
@@ -875,13 +977,17 @@ export default function AgendarPremiumPage() {
                 <p className="text-yellow-300/90 font-black tracking-[0.22em] text-xs sm:text-sm">
                   NOSSOS SERVIÇOS
                 </p>
-                <h2 className="mt-2 text-2xl sm:text-3xl font-black">Preço & Estilo</h2>
+                <h2 className="mt-2 text-2xl sm:text-3xl font-black">
+                  Preço & Estilo
+                </h2>
               </div>
             </div>
 
             <div className="p-5 sm:p-7">
               {services.length === 0 ? (
-                <p className="text-white/65">Nenhum serviço cadastrado ainda.</p>
+                <p className="text-white/65">
+                  Nenhum serviço cadastrado ainda.
+                </p>
               ) : (
                 <div className="space-y-3">
                   {services
@@ -894,14 +1000,20 @@ export default function AgendarPremiumPage() {
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
-                            <p className="font-black text-white/95 truncate">{sv.name}</p>
+                            <p className="font-black text-white/95 truncate">
+                              {sv.name}
+                            </p>
                             <p className="text-xs text-white/60 mt-1">
-                              {sv.duration_minutes ? `Duração: ${sv.duration_minutes} min` : "Duração: padrão"}
+                              {sv.duration_minutes
+                                ? `Duração: ${sv.duration_minutes} min`
+                                : "Duração: padrão"}
                             </p>
                           </div>
 
                           <div className="shrink-0 text-right">
-                            <p className="font-black text-yellow-200">{formatBRL(sv.price) || "—"}</p>
+                            <p className="font-black text-yellow-200">
+                              {formatBRL(sv.price) || "—"}
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -912,8 +1024,12 @@ export default function AgendarPremiumPage() {
           </div>
 
           <div className="rounded-[34px] border border-white/10 bg-black/30 backdrop-blur-md p-5 sm:p-7 shadow-[0_25px_80px_rgba(0,0,0,0.65)]">
-            <h3 className="text-xl sm:text-2xl font-black">O que a gente faz melhor</h3>
-            <p className="text-white/70 mt-2">Visual premium, acabamento e atendimento de respeito.</p>
+            <h3 className="text-xl sm:text-2xl font-black">
+              O que a gente faz melhor
+            </h3>
+            <p className="text-white/70 mt-2">
+              Visual premium, acabamento e atendimento de respeito.
+            </p>
 
             <div className="mt-5 grid sm:grid-cols-2 gap-3">
               {[
@@ -922,7 +1038,10 @@ export default function AgendarPremiumPage() {
                 { t: "Combo corte + barba", d: "O pacote completo." },
                 { t: "Acabamento", d: "Detalhe que muda tudo." },
               ].map((x) => (
-                <div key={x.t} className="rounded-2xl bg-white/5 border border-white/10 p-4">
+                <div
+                  key={x.t}
+                  className="rounded-2xl bg-white/5 border border-white/10 p-4"
+                >
                   <p className="font-black text-yellow-200">{x.t}</p>
                   <p className="text-sm text-white/70 mt-1">{x.d}</p>
                 </div>
@@ -932,7 +1051,8 @@ export default function AgendarPremiumPage() {
             <div className="mt-6 rounded-2xl bg-black/35 border border-white/10 p-4">
               <p className="text-xs text-white/60 font-bold">Dica</p>
               <p className="text-sm text-white/75 mt-1">
-                Quer um horário ainda hoje? Abra a agenda acima e procure os slots disponíveis.
+                Quer um horário ainda hoje? Abra a agenda acima e procure os
+                slots disponíveis.
               </p>
               <div className="mt-4 flex flex-col sm:flex-row gap-2">
                 <a
@@ -974,7 +1094,9 @@ export default function AgendarPremiumPage() {
               <p className="text-yellow-300/90 font-black tracking-[0.22em] text-xs sm:text-sm">
                 NOSSOS MESTRES
               </p>
-              <h2 className="mt-2 text-2xl sm:text-3xl font-black">Barbeiros</h2>
+              <h2 className="mt-2 text-2xl sm:text-3xl font-black">
+                Barbeiros
+              </h2>
             </div>
           </div>
 
@@ -984,14 +1106,19 @@ export default function AgendarPremiumPage() {
             ) : (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {barbers.map((b) => (
-                  <div key={b.id} className="rounded-2xl bg-white/5 border border-white/10 p-4">
+                  <div
+                    key={b.id}
+                    className="rounded-2xl bg-white/5 border border-white/10 p-4"
+                  >
                     <div className="flex items-center gap-3">
                       <div className="h-12 w-12 rounded-2xl bg-yellow-400/15 border border-yellow-300/25 grid place-items-center font-black text-yellow-200">
                         {b.name?.slice(0, 1)?.toUpperCase() || "B"}
                       </div>
                       <div className="min-w-0">
                         <p className="font-black truncate">{b.name}</p>
-                        <p className="text-xs text-white/60 -mt-0.5">Mestre barbeiro • Atendimento premium</p>
+                        <p className="text-xs text-white/60 -mt-0.5">
+                          Mestre barbeiro • Atendimento premium
+                        </p>
                       </div>
                     </div>
 
@@ -1011,7 +1138,8 @@ export default function AgendarPremiumPage() {
 
             <div className="mt-6 rounded-2xl bg-black/35 border border-white/10 p-4">
               <p className="text-sm text-white/75">
-                “Mestre de verdade não é só técnica — é fazer você sair melhor do que entrou.”
+                “Mestre de verdade não é só técnica — é fazer você sair melhor
+                do que entrou.”
               </p>
               <p className="text-xs text-white/55 mt-2">— {shop.name}</p>
             </div>
@@ -1019,14 +1147,17 @@ export default function AgendarPremiumPage() {
         </div>
       </section>
 
-      {/* CONTATO / FOOTER */}
+      {/* CONTATO */}
       <section id="contato" className="px-4 sm:px-6 lg:px-10 pb-10">
         <div className="mx-auto max-w-7xl rounded-[34px] border border-white/10 bg-black/30 backdrop-blur-md p-5 sm:p-7 shadow-[0_25px_80px_rgba(0,0,0,0.65)]">
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="lg:col-span-2">
-              <h2 className="text-2xl sm:text-3xl font-black">Pronto pra reservar?</h2>
+              <h2 className="text-2xl sm:text-3xl font-black">
+                Pronto pra reservar?
+              </h2>
               <p className="text-white/70 mt-2">
-                Use a agenda acima e finalize em segundos. Se precisar, chama no WhatsApp.
+                Use a agenda acima e finalize em segundos. Se precisar, chama no
+                WhatsApp.
               </p>
 
               <div className="mt-5 flex flex-col sm:flex-row gap-3">
@@ -1035,7 +1166,7 @@ export default function AgendarPremiumPage() {
                   className={clsx(
                     "h-12 sm:h-14 px-6 rounded-2xl font-black text-black grid place-items-center",
                     "bg-yellow-400 hover:brightness-110 transition",
-                    "shadow-[0_0_0_1px_rgba(255,220,120,0.45),0_18px_60px_rgba(0,0,0,0.65)]"
+                    "shadow-[0_0_0_1px_rgba(255,220,120,0.45),0_18px_60px_rgba(0,0,0,0.65)]",
                   )}
                 >
                   Agendar agora
@@ -1062,12 +1193,16 @@ export default function AgendarPremiumPage() {
               <div className="mt-4 space-y-2 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-white/60">Telefone</span>
-                  <span className="font-semibold text-white/90">{shop.phone || "—"}</span>
+                  <span className="font-semibold text-white/90">
+                    {shop.phone || "—"}
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-white/60">Instagram</span>
-                  <span className="font-semibold text-white/90">{shop.instagram ? shop.instagram : "—"}</span>
+                  <span className="font-semibold text-white/90">
+                    {shop.instagram ? shop.instagram : "—"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1075,7 +1210,8 @@ export default function AgendarPremiumPage() {
 
           <div className="mt-8 pt-5 border-t border-white/10 text-xs text-white/55 flex flex-col sm:flex-row gap-2 items-center justify-between">
             <p>
-              © {new Date().getFullYear()} {shop.name} — Todos os direitos reservados.
+              © {new Date().getFullYear()} {shop.name} — Todos os direitos
+              reservados.
             </p>
             <p className="text-white/45">Powered by Barber Premium</p>
           </div>
