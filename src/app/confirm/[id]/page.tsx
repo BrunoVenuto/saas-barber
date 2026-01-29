@@ -12,9 +12,6 @@ type Appointment = {
   start_time: string | null;
   end_time: string | null;
   client_name: string | null;
-  client_phone: string | null;
-  barber_id: string | null;
-  service_id: string | null;
 };
 
 function toHHMM(t?: string | null) {
@@ -27,13 +24,28 @@ function clsx(...arr: Array<string | false | null | undefined>) {
   return arr.filter(Boolean).join(" ");
 }
 
+const ALLOWED_TO_CONFIRM = [
+  "pending",
+  "reschedule_requested",
+  "reschedule_pending",
+  "suggested",
+  "suggested_time",
+  "waiting_client",
+  "awaiting_client",
+] as const;
+
+function isAllowedStatus(status: string | null) {
+  const st = String(status || "").toLowerCase();
+  return ALLOWED_TO_CONFIRM.includes(st as (typeof ALLOWED_TO_CONFIRM)[number]);
+}
+
 export default function ConfirmAppointmentPage() {
   const supabase = createClient();
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
 
   const id = params?.id;
-  const token = search.get("token") || "";
+  const token = (search.get("token") || "").trim();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -44,7 +56,7 @@ export default function ConfirmAppointmentPage() {
     "idle",
   );
 
-  const isTokenValid = useMemo(() => token.trim().length >= 16, [token]);
+  const tokenOk = useMemo(() => token.length >= 16, [token]);
 
   useEffect(() => {
     async function load() {
@@ -58,46 +70,41 @@ export default function ConfirmAppointmentPage() {
         return;
       }
 
-      if (!isTokenValid) {
+      if (!tokenOk) {
         setMode("error");
         setMsg("Link inválido (token ausente).");
         setLoading(false);
         return;
       }
 
-      // ✅ Busca pelo ID + token (não vaza dado se token não bate)
       const { data, error } = await supabase
         .from("appointments")
-        .select(
-          "id,status,action_token,date,start_time,end_time,client_name,client_phone,barber_id,service_id",
-        )
+        .select("id,status,action_token,date,start_time,end_time,client_name")
         .eq("id", id)
         .eq("action_token", token)
         .single();
 
       if (error || !data) {
         setMode("warning");
-        setMsg(
-          "Esse agendamento já foi confirmado/cancelado ou o link é inválido.",
-        );
+        setMsg("Esse link é inválido ou já foi usado.");
         setAppt(null);
         setLoading(false);
         return;
       }
 
-      setAppt(data as Appointment);
+      const a = data as Appointment;
 
-      // ✅ Aceita PENDING como estado correto (é o que você grava)
-      const st = String(data.status || "").toLowerCase();
-      if (st !== "pending") {
+      if (!isAllowedStatus(a.status)) {
         setMode("warning");
         setMsg(
           "Esse agendamento já foi confirmado/cancelado ou o link é inválido.",
         );
+        setAppt(a);
         setLoading(false);
         return;
       }
 
+      setAppt(a);
       setMode("idle");
       setLoading(false);
     }
@@ -107,20 +114,17 @@ export default function ConfirmAppointmentPage() {
   }, [id, token]);
 
   async function handleConfirm() {
-    if (!id || !token || !appt) return;
+    if (!id || !tokenOk || !appt) return;
 
     setSubmitting(true);
     setMsg(null);
 
-    // ✅ Atualiza apenas se id+token baterem e status ainda for pending
     const { error } = await supabase
       .from("appointments")
-      .update({
-        status: "confirmed",
-      })
+      .update({ status: "confirmed" })
       .eq("id", id)
       .eq("action_token", token)
-      .eq("status", "pending");
+      .in("status", [...ALLOWED_TO_CONFIRM]);
 
     if (error) {
       setMode("error");
@@ -139,13 +143,13 @@ export default function ConfirmAppointmentPage() {
       <div className="w-full max-w-xl rounded-[28px] border border-white/10 bg-black/40 backdrop-blur-md shadow-[0_25px_90px_rgba(0,0,0,0.65)] overflow-hidden">
         <div className="p-6 sm:p-8 border-b border-white/10">
           <p className="text-xs tracking-[0.22em] font-black text-white/60">
-            Confirmação
+            CLIENTE
           </p>
           <h1 className="mt-2 text-2xl sm:text-3xl font-black">
-            Confirmar agendamento
+            Confirmar horário
           </h1>
           <p className="mt-2 text-white/65 text-sm">
-            Abra esse link apenas se você for o barbeiro responsável.
+            Confirme somente se esse horário ficou ok pra você.
           </p>
         </div>
 
@@ -156,27 +160,8 @@ export default function ConfirmAppointmentPage() {
             </div>
           ) : (
             <>
-              {msg && (
-                <div
-                  className={clsx(
-                    "rounded-2xl border p-4",
-                    mode === "success" &&
-                      "bg-emerald-500/10 border-emerald-400/30 text-emerald-200",
-                    mode === "warning" &&
-                      "bg-yellow-500/10 border-yellow-400/30 text-yellow-200",
-                    mode === "error" &&
-                      "bg-red-500/10 border-red-400/30 text-red-200",
-                    mode === "idle" &&
-                      "bg-white/5 border-white/10 text-white/80",
-                  )}
-                >
-                  <p className="font-bold">Atenção</p>
-                  <p className="text-sm mt-1">{msg}</p>
-                </div>
-              )}
-
-              {mode === "idle" && appt && (
-                <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+              {!!appt && (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <p className="text-xs text-white/55">Detalhes</p>
                   <div className="mt-2 space-y-1 text-white/85">
                     <p>
@@ -200,18 +185,37 @@ export default function ConfirmAppointmentPage() {
                 </div>
               )}
 
+              {msg && (
+                <div
+                  className={clsx(
+                    "mt-4 rounded-2xl border p-4",
+                    mode === "success" &&
+                      "bg-emerald-500/10 border-emerald-400/30 text-emerald-200",
+                    mode === "warning" &&
+                      "bg-yellow-500/10 border-yellow-400/30 text-yellow-200",
+                    mode === "error" &&
+                      "bg-red-500/10 border-red-400/30 text-red-200",
+                    mode === "idle" &&
+                      "bg-white/5 border-white/10 text-white/80",
+                  )}
+                >
+                  <p className="font-bold">Status</p>
+                  <p className="text-sm mt-1">{msg}</p>
+                </div>
+              )}
+
               <div className="mt-6 flex flex-col gap-3">
-                {mode === "idle" && (
+                {mode === "idle" && isAllowedStatus(appt?.status ?? null) && (
                   <button
                     onClick={handleConfirm}
-                    disabled={submitting || !appt}
+                    disabled={submitting}
                     className={clsx(
                       "h-12 w-full rounded-2xl font-black text-black transition",
                       "bg-yellow-400 hover:brightness-110 disabled:opacity-50 disabled:hover:brightness-100",
                       "shadow-[0_0_0_1px_rgba(255,220,120,0.35),0_18px_55px_rgba(0,0,0,0.65)]",
                     )}
                   >
-                    {submitting ? "Confirmando..." : "Confirmar agora"}
+                    {submitting ? "Confirmando..." : "Confirmar"}
                   </button>
                 )}
 
@@ -223,8 +227,7 @@ export default function ConfirmAppointmentPage() {
                 </a>
 
                 <p className="text-[11px] text-white/45 text-center">
-                  Se você abriu isso por engano, ignore. Se tiver dúvida, fale
-                  com a barbearia.
+                  Se você abriu isso por engano, pode fechar.
                 </p>
               </div>
             </>

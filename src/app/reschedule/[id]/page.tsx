@@ -4,50 +4,43 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
-type Params = { id: string };
-
-type RescheduleContextRow = {
-  appointment_id: string;
-  barber_id: string;
-  barbershop_id: string;
-  service_id: string | null;
-  duration_minutes: number;
-  curr_date: string; // yyyy-mm-dd
-  curr_start_time: string; // HH:mm:ss
-};
-
-type WorkingHourRow = {
+type Appointment = {
   id: string;
-  barbershop_id: string;
+  status: string | null;
+  action_token: string | null;
+  date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  client_name: string | null;
+  client_phone: string | null;
   barber_id: string | null;
-  weekday: number;
-  start_time: string; // HH:mm:ss
-  end_time: string; // HH:mm:ss
+  service_id: string | null;
 };
 
-type BusyTimeRow = {
-  start_hhmm: string; // HH:mm
+type WorkingHour = {
+  id: string;
+  barber_id: string | null;
+  weekday: number | string;
+  start_time: string;
+  end_time: string;
 };
 
-function clsx(...arr: Array<string | false | null | undefined>) {
-  return arr.filter(Boolean).join(" ");
+function onlyDigits(v: string) {
+  return (v || "").replace(/\D/g, "");
 }
 
-function isUuid(v: string | null): v is string {
-  if (!v) return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    v,
-  );
+function waLink(raw: string | null) {
+  const d0 = onlyDigits(raw || "");
+  const d = d0.replace(/^0+/, "");
+  if (!d) return null;
+  const final = d.startsWith("55") ? d : `55${d}`;
+  return `https://wa.me/${final}`;
 }
 
-function toWeekday(dateStr: string) {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.getDay(); // 0..6
-}
-
-function toHHMM(t: string) {
+function toHHMM(t?: string | null) {
   if (!t) return "";
-  return String(t).slice(0, 5);
+  const s = String(t);
+  return s.length >= 5 ? s.slice(0, 5) : s;
 }
 
 function hhmmToMinutes(hhmm: string) {
@@ -68,383 +61,213 @@ function uniqSorted(arr: string[]) {
   );
 }
 
-function onlyDigits(v: string) {
-  return (v || "").replace(/\D/g, "");
-}
-
-function waLink(raw: string | null) {
-  const d0 = onlyDigits(raw || "");
-  const d = d0.replace(/^0+/, "");
-  if (!d) return null;
-  const final = d.startsWith("55") ? d : `55${d}`;
-  return `https://wa.me/${final}`;
+function clsx(...arr: Array<string | false | null | undefined>) {
+  return arr.filter(Boolean).join(" ");
 }
 
 export default function ReschedulePage() {
   const supabase = createClient();
-  const { id } = useParams<Params>();
-  const sp = useSearchParams();
-  const token = sp.get("token");
+  const params = useParams<{ id: string }>();
+  const search = useSearchParams();
+
+  const id = params?.id;
+  const token = (search.get("token") || "").trim();
 
   const [loading, setLoading] = useState(true);
-  const [busyLoading, setBusyLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
+  const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const [ctx, setCtx] = useState<RescheduleContextRow | null>(null);
-  const [hours, setHours] = useState<WorkingHourRow[]>([]);
+  const [appt, setAppt] = useState<Appointment | null>(null);
+  const [hours, setHours] = useState<WorkingHour[]>([]);
   const [busy, setBusy] = useState<string[]>([]);
 
-  const [newDate, setNewDate] = useState("");
-  const [newTime, setNewTime] = useState("");
+  const [date, setDate] = useState("");
+  const [selectedTime, setSelectedTime] = useState("");
 
-  const canRun = useMemo(() => isUuid(id) && isUuid(token), [id, token]);
+  const tokenOk = useMemo(() => token.length >= 16, [token]);
 
-  // Load contexto + working hours
   useEffect(() => {
     async function load() {
       setLoading(true);
       setMsg(null);
 
-      if (!canRun) {
+      if (!id || !tokenOk) {
+        setMsg("Link inválido.");
         setLoading(false);
-        setMsg("Link inválido. Verifique se o link está completo.");
-        setCtx(null);
-        setHours([]);
         return;
       }
 
-      const [ctxRes, hoursRes] = await Promise.all([
-        supabase.rpc("rpc_get_reschedule_context", {
-          p_appointment_id: id,
-          p_token: token,
-        }),
-        supabase.rpc("rpc_get_working_hours_for_reschedule", {
-          p_appointment_id: id,
-          p_token: token,
-        }),
-      ]);
+      const { data, error } = await supabase
+        .from("appointments")
+        .select(
+          "id,status,action_token,date,start_time,end_time,client_name,client_phone,barber_id,service_id",
+        )
+        .eq("id", id)
+        .eq("action_token", token)
+        .single();
 
-      if (
-        ctxRes.error ||
-        !Array.isArray(ctxRes.data) ||
-        ctxRes.data.length === 0
-      ) {
+      if (error || !data) {
+        setMsg("Link inválido ou já usado.");
         setLoading(false);
-        setMsg(
-          "Não consegui carregar o agendamento (token inválido ou expirado).",
-        );
-        setCtx(null);
-        setHours([]);
         return;
       }
 
-      const row = ctxRes.data[0] as RescheduleContextRow;
-      setCtx(row);
-      setNewDate(row.curr_date);
-      setNewTime("");
+      setAppt(data as Appointment);
 
-      if (hoursRes.error) {
-        setMsg("Não consegui carregar a agenda de horários.");
-        setHours([]);
-      } else {
-        setHours(
-          Array.isArray(hoursRes.data)
-            ? (hoursRes.data as WorkingHourRow[])
-            : [],
-        );
-      }
+      const { data: hData } = await supabase
+        .from("working_hours")
+        .select("id,barber_id,weekday,start_time,end_time")
+        .eq("barber_id", data.barber_id);
 
+      setHours(Array.isArray(hData) ? hData : []);
       setLoading(false);
     }
 
     load();
-  }, [supabase, id, token, canRun]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, token]);
 
-  // Load busy times when date changes
+  async function loadBusy(d: string) {
+    if (!appt?.barber_id || !d) return;
+
+    const { data } = await supabase
+      .from("appointments")
+      .select("start_time,status")
+      .eq("date", d)
+      .eq("barber_id", appt.barber_id)
+      .neq("id", appt.id)
+      .neq("status", "canceled");
+
+    const reserved = (data || []).map((x: { start_time: string }) =>
+      toHHMM(x.start_time),
+    );
+    setBusy(uniqSorted(reserved));
+  }
+
   useEffect(() => {
-    async function loadBusy() {
-      if (!canRun || !ctx || !newDate) return;
-
-      setBusyLoading(true);
-      setMsg(null);
-
-      const { data, error } = await supabase.rpc("rpc_get_busy_times", {
-        p_appointment_id: id,
-        p_token: token,
-        p_date: newDate,
-      });
-
-      if (error) {
-        setBusy([]);
-        setBusyLoading(false);
-        setMsg("Erro ao carregar horários ocupados.");
-        return;
-      }
-
-      const reserved = (Array.isArray(data) ? (data as BusyTimeRow[]) : [])
-        .map((x) => x.start_hhmm)
-        .filter(Boolean);
-
-      setBusy(uniqSorted(reserved));
-      setBusyLoading(false);
-    }
-
-    loadBusy();
-  }, [supabase, id, token, canRun, ctx, newDate]);
-
-  const slotMinutes = useMemo(() => {
-    const d = ctx?.duration_minutes ?? 60;
-    return d > 0 ? d : 60;
-  }, [ctx?.duration_minutes]);
-
-  const hoursForDate = useMemo(() => {
-    if (!ctx || !newDate) return [];
-    const wd = toWeekday(newDate);
-
-    return hours.filter((h) => {
-      if (Number(h.weekday) !== wd) return false;
-      // (a RPC já trouxe geral+barbeiro, então aqui é só por dia)
-      return true;
-    });
-  }, [hours, ctx, newDate]);
+    if (date) loadBusy(date);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
 
   const slots = useMemo(() => {
-    if (!newDate || hoursForDate.length === 0) return [];
+    if (!date || !hours.length) return [];
+
+    const wd = new Date(date + "T00:00:00").getDay();
+    const relevant = hours.filter((h) => Number(h.weekday) === wd);
 
     const all: string[] = [];
-    for (const h of hoursForDate) {
+    for (const h of relevant) {
       const start = hhmmToMinutes(toHHMM(h.start_time));
       const end = hhmmToMinutes(toHHMM(h.end_time));
-
-      for (let t = start; t + slotMinutes <= end; t += slotMinutes) {
+      for (let t = start; t + 60 <= end; t += 60) {
         all.push(minutesToHHMM(t));
       }
     }
 
     const unique = uniqSorted(all);
     return unique.filter((t) => !busy.includes(t));
-  }, [newDate, hoursForDate, slotMinutes, busy]);
+  }, [date, hours, busy]);
 
-  async function submitSuggestion() {
-    if (!canRun || !ctx) return;
+  async function handleSave() {
+    if (!appt || !date || !selectedTime) return;
 
+    setSaving(true);
     setMsg(null);
 
-    if (!newDate) return setMsg("Selecione uma data.");
-    if (!newTime) return setMsg("Selecione um horário.");
+    const end_time = minutesToHHMM(hhmmToMinutes(selectedTime) + 60);
 
-    if (busy.includes(newTime)) {
-      setMsg("Esse horário já foi ocupado. Escolha outro.");
-      setNewTime("");
+    const { error } = await supabase
+      .from("appointments")
+      .update({
+        date,
+        start_time: selectedTime,
+        end_time,
+        status: "reschedule_requested",
+      })
+      .eq("id", appt.id)
+      .eq("action_token", token);
+
+    if (error) {
+      setMsg("Erro ao salvar: " + error.message);
+      setSaving(false);
       return;
     }
 
-    const startMin = hhmmToMinutes(newTime);
-    const endMin = startMin + slotMinutes;
-
-    const proposed_start = newTime; // HH:mm
-    const proposed_end = minutesToHHMM(endMin); // HH:mm
-
-    setSubmitting(true);
-
-    const { data, error } = await supabase.rpc(
-      "rpc_create_reschedule_request",
-      {
-        p_appointment_id: id,
-        p_token: token,
-        p_proposed_date: newDate,
-        p_proposed_start: `${proposed_start}:00`,
-        p_proposed_end: `${proposed_end}:00`,
-      },
-    );
-
-    if (error || !Array.isArray(data) || data.length === 0) {
-      setSubmitting(false);
-      setMsg(
-        "Não consegui criar a sugestão. Verifique o link e tente novamente.",
-      );
-      return;
-    }
-
-    const created = data[0] as { request_id: string; request_token: string };
-
+    // ✅ AQUI ESTÁ O PONTO CRÍTICO: LINKS COM TOKEN
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-    const acceptUrl = `${baseUrl}/reschedule-request/${created.request_id}/accept?token=${created.request_token}`;
-    const declineUrl = `${baseUrl}/reschedule-request/${created.request_id}/decline?token=${created.request_token}`;
 
-    // Buscar telefone/nome do cliente via RPC segura
-    const apptRes = await supabase.rpc("rpc_get_appointment_by_token", {
-      p_appointment_id: id,
-      p_token: token,
-    });
+    const clientConfirmUrl = `${baseUrl}/confirm/${appt.id}?token=${appt.action_token}`;
+    const clientDeclineUrl = `${baseUrl}/decline/${appt.id}?token=${appt.action_token}`;
 
-    const apptRow =
-      Array.isArray(apptRes.data) && apptRes.data.length > 0
-        ? (apptRes.data[0] as {
-            client_name: string | null;
-            client_phone: string | null;
-          })
-        : null;
+    const message =
+      `Olá ${appt.client_name || ""}, o barbeiro sugeriu um novo horário:\n\n` +
+      `Data: ${date}\n` +
+      `Horário: ${selectedTime}\n\n` +
+      `Você pode:\n` +
+      `Confirmar: ${clientConfirmUrl}\n` +
+      `Recusar: ${clientDeclineUrl}`;
 
-    const phoneDigits = apptRow?.client_phone
-      ? onlyDigits(apptRow.client_phone)
-      : "";
-    const wa = waLink(phoneDigits || null);
-
-    if (!wa) {
-      setSubmitting(false);
-      setMsg("Sugestão criada, mas o WhatsApp do cliente não está válido.");
-      return;
+    const wa = waLink(appt.client_phone || null);
+    if (wa) {
+      window.open(`${wa}?text=${encodeURIComponent(message)}`, "_blank");
     }
 
-    const text =
-      `*Sugestão de novo horário*\n\n` +
-      `Cliente: ${apptRow?.client_name || "—"}\n` +
-      `Data sugerida: ${newDate}\n` +
-      `Horário sugerido: ${proposed_start}\n\n` +
-      `✅ Aceitar:\n${acceptUrl}\n\n` +
-      `❌ Recusar:\n${declineUrl}`;
-
-    const link = `${wa}?text=${encodeURIComponent(text)}`;
-    window.open(link, "_blank", "noopener,noreferrer");
-
-    setSubmitting(false);
-    setMsg("Sugestão enviada para o cliente no WhatsApp.");
-  }
-
-  // UI
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black text-white px-4 py-10">
-        <div className="mx-auto max-w-md rounded-3xl border border-white/10 bg-white/5 p-5">
-          <p className="text-white/70">Carregando...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!ctx) {
-    return (
-      <div className="min-h-screen bg-black text-white px-4 py-10">
-        <div className="mx-auto max-w-md rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_20px_70px_rgba(0,0,0,0.65)]">
-          <p className="text-xs text-white/60">Remarcação</p>
-          <h1 className="mt-1 text-2xl font-black">Sugerir outro horário</h1>
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
-            <p className="text-white/80">{msg || "Link inválido."}</p>
-          </div>
-          <a
-            href="/"
-            className="mt-5 h-12 w-full rounded-2xl bg-white/10 border border-white/10 grid place-items-center font-black hover:bg-white/15 transition"
-          >
-            Voltar
-          </a>
-        </div>
-      </div>
-    );
+    setMsg("Sugestão enviada ao cliente pelo WhatsApp.");
+    setSaving(false);
   }
 
   return (
-    <div className="min-h-screen bg-black text-white px-4 py-10">
-      <div className="mx-auto max-w-md rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_20px_70px_rgba(0,0,0,0.65)]">
-        <p className="text-xs text-white/60">Remarcação</p>
-        <h1 className="mt-1 text-2xl font-black">Sugerir outro horário</h1>
-        <p className="mt-2 text-sm text-white/60">
-          Selecione um dia e escolha um horário{" "}
-          <span className="text-white/85 font-bold">livre</span>. Depois envie
-          para o cliente confirmar.
-        </p>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-xl rounded-[28px] border border-white/10 bg-black/40 backdrop-blur-md p-6">
+        <h1 className="text-2xl font-black">Sugerir novo horário</h1>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
-          <p className="text-sm text-white/70">
-            Atual:{" "}
-            <span className="font-bold text-white/90">{ctx.curr_date}</span> •{" "}
-            <span className="font-bold text-white/90">
-              {toHHMM(ctx.curr_start_time)}
-            </span>
-            <span className="text-white/50"> • </span>
-            <span className="text-white/75">{slotMinutes} min</span>
-          </p>
-        </div>
+        {loading ? (
+          <p className="mt-4 text-white/70">Carregando...</p>
+        ) : (
+          <>
+            {msg && (
+              <div className="mt-4 p-3 rounded-xl bg-white/10">{msg}</div>
+            )}
 
-        {msg && (
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-white/85">
-            {msg}
-          </div>
-        )}
+            <div className="mt-4">
+              <label className="text-sm font-bold">Nova data</label>
+              <input
+                type="date"
+                className="w-full mt-2 bg-black/40 border border-white/10 rounded-xl px-3 py-3"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
-          <label className="text-sm font-bold text-white/80">Nova data</label>
-          <input
-            type="date"
-            className="mt-2 w-full rounded-2xl bg-black/40 border border-white/10 px-3 py-3 outline-none"
-            value={newDate}
-            onChange={(e) => {
-              setNewDate(e.target.value);
-              setNewTime("");
-            }}
-          />
-
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-sm font-bold text-white/80">Horários livres</p>
-            <p className="text-xs text-white/55">
-              {busyLoading ? "Carregando..." : `${slots.length} opções`}
-            </p>
-          </div>
-
-          {!newDate ? (
-            <p className="mt-2 text-white/60 text-sm">Selecione uma data.</p>
-          ) : busyLoading ? (
-            <p className="mt-2 text-white/60 text-sm">Carregando horários...</p>
-          ) : hoursForDate.length === 0 ? (
-            <p className="mt-2 text-white/60 text-sm">
-              Sem horários configurados para esse dia.
-            </p>
-          ) : slots.length === 0 ? (
-            <p className="mt-2 text-white/60 text-sm">
-              Nenhum horário livre nesse dia.
-            </p>
-          ) : (
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              {slots.map((t) => {
-                const selected = newTime === t;
-                return (
+            <div className="mt-4">
+              <p className="text-sm font-bold">Horários disponíveis</p>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {slots.map((t) => (
                   <button
                     key={t}
-                    type="button"
-                    onClick={() => setNewTime(t)}
+                    onClick={() => setSelectedTime(t)}
                     className={clsx(
-                      "h-12 rounded-2xl font-black border transition",
-                      selected
-                        ? "bg-yellow-400 text-black border-yellow-300"
-                        : "bg-white/10 text-white border-white/10 hover:bg-white/15",
+                      "h-10 rounded-xl font-bold",
+                      selectedTime === t
+                        ? "bg-yellow-400 text-black"
+                        : "bg-white/10",
                     )}
                   >
                     {t}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          )}
 
-          <button
-            type="button"
-            onClick={submitSuggestion}
-            disabled={submitting || !newDate || !newTime}
-            className={clsx(
-              "mt-5 w-full h-12 rounded-2xl font-black transition",
-              "bg-emerald-500 text-black hover:brightness-110",
-              "disabled:opacity-50 disabled:hover:brightness-100",
-            )}
-          >
-            {submitting ? "Enviando..." : "Enviar sugestão ao cliente"}
-          </button>
-
-          <p className="mt-3 text-xs text-white/55">
-            Isso abre o WhatsApp com links de <b>aceitar</b> ou <b>recusar</b>.
-          </p>
-        </div>
+            <button
+              disabled={!date || !selectedTime || saving}
+              onClick={handleSave}
+              className="mt-6 w-full h-12 rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
+            >
+              {saving ? "Enviando..." : "Enviar sugestão ao cliente"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
