@@ -33,32 +33,42 @@ type Barbershop = {
   is_active?: boolean;
 };
 
-function getErrorMessage(e: unknown) {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
   try {
-    return JSON.stringify(e);
+    return JSON.stringify(err);
   } catch {
     return "Erro inesperado.";
   }
 }
 
+function getSlugFromParams(params: unknown): string {
+  // Next.js useParams pode variar; tratamos como unknown e extraímos com segurança.
+  if (params && typeof params === "object" && "slug" in params) {
+    const v = (params as { slug?: unknown }).slug;
+
+    if (typeof v === "string") return v.trim();
+    if (Array.isArray(v) && typeof v[0] === "string") return v[0].trim();
+  }
+  return "";
+}
+
 export default function PublicBookingPage() {
   const supabase = useMemo(() => createClient(), []);
 
-  // suporta os dois cenários: /agendar e /agendar/[slug]
-  const params = useParams() as { slug?: string };
+  const params = useParams();
   const pathname = usePathname();
   const search = useSearchParams();
 
-  const slugFromParams = params?.slug;
-  const slugFromPath = pathname?.split("/").filter(Boolean).pop();
-  const slug = (slugFromParams || slugFromPath || "").trim();
-
   const debug = search.get("debug") === "1";
 
-  const [barbershop, setBarbershop] = useState<Barbershop | null>(null);
+  // suporta /agendar (sem slug) e /agendar/<slug> (pegando do path se necessário)
+  const slugFromParams = getSlugFromParams(params);
+  const slugFromPath = (pathname ?? "").split("/").filter(Boolean).pop();
+  const slug = (slugFromParams || slugFromPath || "").trim();
 
+  const [barbershop, setBarbershop] = useState<Barbershop | null>(null);
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [services, setServices] = useState<Service[]>([]);
 
@@ -106,6 +116,12 @@ export default function PublicBookingPage() {
           setBarbershop(null);
           setBarbers([]);
           setServices([]);
+          setSelectedBarber("");
+          setSelectedService("");
+          setDate("");
+          setTime("");
+          setWorkingHours([]);
+          setAppointments([]);
           return;
         }
 
@@ -125,6 +141,7 @@ export default function PublicBookingPage() {
           return;
         }
 
+        // Tipagem defensiva: como a tabela deve ter id/slug, tratamos como Barbershop
         const shopTyped = shop as Barbershop;
         setBarbershop(shopTyped);
 
@@ -146,13 +163,13 @@ export default function PublicBookingPage() {
 
         if (cancelled) return;
 
-        if (bErr && debug) console.log("barbers error:", bErr);
-        if (sErr && debug) console.log("services error:", sErr);
+        if (debug && bErr) console.log("barbers error:", bErr);
+        if (debug && sErr) console.log("services error:", sErr);
 
         setBarbers(Array.isArray(b) ? (b as Barber[]) : []);
         setServices(Array.isArray(s) ? (s as Service[]) : []);
 
-        // reseta seleções quando trocar de slug/barbearia
+        // reseta seleções quando carregar/alterar slug
         setSelectedBarber("");
         setSelectedService("");
         setDate("");
@@ -206,8 +223,8 @@ export default function PublicBookingPage() {
 
       if (cancelled) return;
 
-      if (whErr && debug) console.log("working_hours error:", whErr);
-      if (apErr && debug) console.log("appointments error:", apErr);
+      if (debug && whErr) console.log("working_hours error:", whErr);
+      if (debug && apErr) console.log("appointments error:", apErr);
 
       setWorkingHours(Array.isArray(wh) ? (wh as WorkingHour[]) : []);
       setAppointments(Array.isArray(ap) ? (ap as Appointment[]) : []);
@@ -396,12 +413,11 @@ export default function PublicBookingPage() {
                     <button
                       key={b.id}
                       onClick={() => setSelectedBarber(b.id)}
-                      className={`p-3 rounded border text-left font-semibold transition
-                        ${
-                          active
-                            ? "bg-yellow-400 text-black border-yellow-400"
-                            : "bg-zinc-900 text-white border-white/10 hover:bg-zinc-800"
-                        }`}
+                      className={`p-3 rounded border text-left font-semibold transition ${
+                        active
+                          ? "bg-yellow-400 text-black border-yellow-400"
+                          : "bg-zinc-900 text-white border-white/10 hover:bg-zinc-800"
+                      }`}
                     >
                       {b.name}
                     </button>
@@ -443,12 +459,11 @@ export default function PublicBookingPage() {
                     <button
                       key={s.id}
                       onClick={() => setSelectedService(s.id)}
-                      className={`p-3 rounded border text-left font-semibold transition
-                        ${
-                          active
-                            ? "bg-yellow-400 text-black border-yellow-400"
-                            : "bg-zinc-900 text-white border-white/10 hover:bg-zinc-800"
-                        }`}
+                      className={`p-3 rounded border text-left font-semibold transition ${
+                        active
+                          ? "bg-yellow-400 text-black border-yellow-400"
+                          : "bg-zinc-900 text-white border-white/10 hover:bg-zinc-800"
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span>{s.name}</span>
@@ -493,7 +508,6 @@ export default function PublicBookingPage() {
               <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
                 {slots.map((t) => {
                   const isSelected = t === time;
-
                   return (
                     <button
                       key={t}
