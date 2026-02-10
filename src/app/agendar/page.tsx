@@ -303,6 +303,9 @@ export default function PublicBookingPage() {
             ? `Agende em ${barbershop.name}`
             : "Agende seu horário"}
         </h1>
+        <div className="text-xs opacity-70 break-all">
+          path: {typeof window !== "undefined" ? window.location.pathname : ""}
+        </div>
 
         {errorMsg && (
           <div className="p-3 rounded bg-red-500/15 border border-red-500/30 text-red-200">
