@@ -33,6 +33,16 @@ type Barbershop = {
   is_active?: boolean;
 };
 
+function getErrorMessage(e: unknown) {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return "Erro inesperado.";
+  }
+}
+
 export default function PublicBookingPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -149,8 +159,8 @@ export default function PublicBookingPage() {
         setTime("");
         setWorkingHours([]);
         setAppointments([]);
-      } catch (e: any) {
-        if (!cancelled) setErrorMsg(e?.message || "Erro ao carregar dados.");
+      } catch (e: unknown) {
+        if (!cancelled) setErrorMsg(getErrorMessage(e));
       } finally {
         if (!cancelled) setPageLoading(false);
       }
@@ -270,16 +280,13 @@ export default function PublicBookingPage() {
     const startMin = timeToMinutes(time);
     const endMin = startMin + service.duration_minutes;
 
-    const start_time = time;
-    const end_time = minutesToTime(endMin);
-
     const { error } = await supabase.from("appointments").insert({
       barber_id: selectedBarber,
       service_id: selectedService,
       client_id: null,
       date,
-      start_time,
-      end_time,
+      start_time: time,
+      end_time: minutesToTime(endMin),
       status: "scheduled",
     });
 
@@ -292,8 +299,7 @@ export default function PublicBookingPage() {
     alert("✅ Agendado com sucesso!");
     setLoading(false);
 
-    // recarrega horários do dia (pra refletir o horário ocupado)
-    // (sem depender de refresh da página)
+    // recarrega o dia para refletir o horário ocupado
     const d = new Date(date);
     const weekday = d.getDay() === 0 ? 7 : d.getDay();
 
@@ -426,7 +432,7 @@ export default function PublicBookingPage() {
               </select>
             </div>
 
-            {/* Mobile buttons (resolve o bug do select no mobile) */}
+            {/* Mobile buttons */}
             <div className="md:hidden grid grid-cols-1 gap-2">
               {services.length === 0 ? (
                 <p className="opacity-60">Nenhum serviço disponível.</p>
