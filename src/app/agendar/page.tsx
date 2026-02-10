@@ -4,28 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
-type Barber = {
-  id: string;
-  name: string;
-};
-
-type Service = {
-  id: string;
-  name: string;
-  duration_minutes: number;
-};
-
-type WorkingHour = {
-  weekday: number;
-  start_time: string;
-  end_time: string;
-};
-
-type Appointment = {
-  start_time: string;
-  end_time: string;
-};
-
+type Barber = { id: string; name: string };
+type Service = { id: string; name: string; duration_minutes: number };
+type WorkingHour = { weekday: number; start_time: string; end_time: string };
+type Appointment = { start_time: string; end_time: string };
 type Barbershop = {
   id: string;
   name?: string;
@@ -34,9 +16,8 @@ type Barbershop = {
 };
 
 export default function PublicBookingPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const params = useParams();
-
   const slug = params.slug as string;
 
   const [, setBarbershop] = useState<Barbershop | null>(null);
@@ -50,48 +31,58 @@ export default function PublicBookingPage() {
 
   const [workingHours, setWorkingHours] = useState<WorkingHour[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-
   const [loading, setLoading] = useState(false);
 
   // =========================
   // LOAD BARBERSHOP
   // =========================
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
-      const { data: shop } = await supabase
+      const { data: shop, error: shopErr } = await supabase
         .from("barbershops")
         .select("*")
         .eq("slug", slug)
         .single();
 
-      if (!shop) return;
+      if (shopErr || !shop || cancelled) return;
 
       setBarbershop(shop as Barbershop);
 
-      const { data: b } = await supabase
-        .from("barbers")
-        .select("id, name")
-        .eq("barbershop_id", (shop as Barbershop).id)
-        .order("name");
+      const shopId = (shop as Barbershop).id;
 
-      const { data: s } = await supabase
-        .from("services")
-        .select("id, name, duration_minutes")
-        .eq("barbershop_id", (shop as Barbershop).id)
-        .order("name");
+      const [{ data: b }, { data: s }] = await Promise.all([
+        supabase
+          .from("barbers")
+          .select("id, name")
+          .eq("barbershop_id", shopId)
+          .order("name"),
+        supabase
+          .from("services")
+          .select("id, name, duration_minutes")
+          .eq("barbershop_id", shopId)
+          .order("name"),
+      ]);
+
+      if (cancelled) return;
 
       setBarbers(Array.isArray(b) ? (b as Barber[]) : []);
       setServices(Array.isArray(s) ? (s as Service[]) : []);
     }
 
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, supabase]);
 
   // =========================
   // LOAD DAY DATA
   // =========================
   useEffect(() => {
+    let cancelled = false;
+
     async function loadDay() {
       if (!selectedBarber || !date) return;
 
@@ -100,37 +91,37 @@ export default function PublicBookingPage() {
       const d = new Date(date);
       const weekday = d.getDay() === 0 ? 7 : d.getDay(); // 1-7
 
-      // 🔹 working hours
-      const { data: wh } = await supabase
-        .from("working_hours")
-        .select("weekday, start_time, end_time")
-        .eq("barber_id", selectedBarber)
-        .eq("weekday", weekday);
+      const [{ data: wh }, { data: ap }] = await Promise.all([
+        supabase
+          .from("working_hours")
+          .select("weekday, start_time, end_time")
+          .eq("barber_id", selectedBarber)
+          .eq("weekday", weekday),
+        supabase
+          .from("appointments")
+          .select("start_time, end_time")
+          .eq("barber_id", selectedBarber)
+          .eq("date", date)
+          .eq("status", "scheduled"),
+      ]);
 
-      // 🔹 appointments
-      const { data: ap } = await supabase
-        .from("appointments")
-        .select("start_time, end_time")
-        .eq("barber_id", selectedBarber)
-        .eq("date", date)
-        .eq("status", "scheduled");
+      if (cancelled) return;
 
       setWorkingHours(Array.isArray(wh) ? (wh as WorkingHour[]) : []);
       setAppointments(Array.isArray(ap) ? (ap as Appointment[]) : []);
     }
 
     loadDay();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBarber, date]);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBarber, date, supabase]);
 
-  // =========================
   // HELPERS
-  // =========================
   function timeToMinutes(t: string) {
     const [h, m] = t.split(":").map(Number);
     return h * 60 + m;
   }
-
   function minutesToTime(m: number) {
     const h = Math.floor(m / 60)
       .toString()
@@ -139,9 +130,7 @@ export default function PublicBookingPage() {
     return `${h}:${min}`;
   }
 
-  // =========================
   // BUILD SLOTS
-  // =========================
   const slots: string[] = useMemo(() => {
     if (!selectedService) return [];
     if (workingHours.length === 0) return [];
@@ -168,12 +157,9 @@ export default function PublicBookingPage() {
         const slotEnd = start + duration;
 
         const conflict = occupied.some(
-          (o) => !(slotEnd <= o.start || slotStart >= o.end)
+          (o) => !(slotEnd <= o.start || slotStart >= o.end),
         );
-
-        if (!conflict) {
-          result.push(minutesToTime(slotStart));
-        }
+        if (!conflict) result.push(minutesToTime(slotStart));
 
         start += 30;
       }
@@ -182,9 +168,7 @@ export default function PublicBookingPage() {
     return result;
   }, [workingHours, appointments, selectedService, services]);
 
-  // =========================
   // SUBMIT
-  // =========================
   async function handleSubmit() {
     if (!selectedBarber || !selectedService || !date || !time) {
       alert("Preencha tudo.");
@@ -202,16 +186,13 @@ export default function PublicBookingPage() {
     const startMin = timeToMinutes(time);
     const endMin = startMin + service.duration_minutes;
 
-    const start_time = time;
-    const end_time = minutesToTime(endMin);
-
     const { error } = await supabase.from("appointments").insert({
       barber_id: selectedBarber,
       service_id: selectedService,
       client_id: null,
       date,
-      start_time,
-      end_time,
+      start_time: time,
+      end_time: minutesToTime(endMin),
       status: "scheduled",
     });
 
@@ -225,14 +206,13 @@ export default function PublicBookingPage() {
     setLoading(false);
   }
 
-  // =========================
   // UI
-  // =========================
   return (
     <div className="min-h-screen bg-black text-white p-8 max-w-4xl mx-auto space-y-6">
-      <h1 className="text-4xl font-black text-yellow-400">Agende seu horário</h1>
+      <h1 className="text-4xl font-black text-yellow-400">
+        Agende seu horário
+      </h1>
 
-      {/* SELECTORS */}
       <div className="grid md:grid-cols-2 gap-4">
         <select
           className="p-3 rounded bg-zinc-900 border border-white/10"
@@ -268,24 +248,22 @@ export default function PublicBookingPage() {
         onChange={(e) => setDate(e.target.value)}
       />
 
-      {/* SLOTS */}
       <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
-        {slots.length === 0 && <p className="opacity-60">Nenhum horário disponível.</p>}
+        {slots.length === 0 && (
+          <p className="opacity-60">Nenhum horário disponível.</p>
+        )}
 
         {slots.map((t) => {
           const isSelected = t === time;
-
           return (
             <button
               key={t}
               onClick={() => setTime(t)}
-              className={`py-2 rounded font-bold transition
-                ${
-                  isSelected
-                    ? "bg-yellow-400 text-black"
-                    : "bg-green-600 hover:bg-green-500 text-white"
-                }
-              `}
+              className={`py-2 rounded font-bold transition ${
+                isSelected
+                  ? "bg-yellow-400 text-black"
+                  : "bg-green-600 hover:bg-green-500 text-white"
+              }`}
             >
               {t}
             </button>
