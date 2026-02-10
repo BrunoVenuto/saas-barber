@@ -1,31 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, usePathname, useSearchParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
-type Barber = {
-  id: string;
-  name: string;
-};
-
-type Service = {
-  id: string;
-  name: string;
-  duration_minutes: number;
-};
-
-type WorkingHour = {
-  weekday: number;
-  start_time: string;
-  end_time: string;
-};
-
-type Appointment = {
-  start_time: string;
-  end_time: string;
-};
-
+type Barber = { id: string; name: string };
+type Service = { id: string; name: string; duration_minutes: number };
+type WorkingHour = { weekday: number; start_time: string; end_time: string };
+type Appointment = { start_time: string; end_time: string };
 type Barbershop = {
   id: string;
   name?: string;
@@ -44,10 +26,8 @@ function getErrorMessage(err: unknown): string {
 }
 
 function getSlugFromParams(params: unknown): string {
-  // Next.js useParams pode variar; tratamos como unknown e extraímos com segurança.
   if (params && typeof params === "object" && "slug" in params) {
     const v = (params as { slug?: unknown }).slug;
-
     if (typeof v === "string") return v.trim();
     if (Array.isArray(v) && typeof v[0] === "string") return v[0].trim();
   }
@@ -59,11 +39,8 @@ export default function PublicBookingPage() {
 
   const params = useParams();
   const pathname = usePathname();
-  const search = useSearchParams();
 
-  const debug = search.get("debug") === "1";
-
-  // suporta /agendar (sem slug) e /agendar/<slug> (pegando do path se necessário)
+  // slug pode vir de /agendar/[slug] ou do path
   const slugFromParams = getSlugFromParams(params);
   const slugFromPath = (pathname ?? "").split("/").filter(Boolean).pop();
   const slug = (slugFromParams || slugFromPath || "").trim();
@@ -84,9 +61,7 @@ export default function PublicBookingPage() {
   const [pageLoading, setPageLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // =========================
   // HELPERS
-  // =========================
   function timeToMinutes(t: string) {
     const [h, m] = t.split(":").map(Number);
     return h * 60 + m;
@@ -100,9 +75,7 @@ export default function PublicBookingPage() {
     return `${h}:${min}`;
   }
 
-  // =========================
   // LOAD BARBERSHOP + BARBERS + SERVICES
-  // =========================
   useEffect(() => {
     let cancelled = false;
 
@@ -111,7 +84,7 @@ export default function PublicBookingPage() {
         setPageLoading(true);
         setErrorMsg(null);
 
-        // Se alguém abrir /agendar (sem slug), mostra instrução simples
+        // /agendar (sem slug) → mostra instrução
         if (!slug || slug === "agendar") {
           setBarbershop(null);
           setBarbers([]);
@@ -141,35 +114,30 @@ export default function PublicBookingPage() {
           return;
         }
 
-        // Tipagem defensiva: como a tabela deve ter id/slug, tratamos como Barbershop
         const shopTyped = shop as Barbershop;
         setBarbershop(shopTyped);
 
         const shopId = shopTyped.id;
 
-        const [{ data: b, error: bErr }, { data: s, error: sErr }] =
-          await Promise.all([
-            supabase
-              .from("barbers")
-              .select("id, name")
-              .eq("barbershop_id", shopId)
-              .order("name"),
-            supabase
-              .from("services")
-              .select("id, name, duration_minutes")
-              .eq("barbershop_id", shopId)
-              .order("name"),
-          ]);
+        const [{ data: b }, { data: s }] = await Promise.all([
+          supabase
+            .from("barbers")
+            .select("id, name")
+            .eq("barbershop_id", shopId)
+            .order("name"),
+          supabase
+            .from("services")
+            .select("id, name, duration_minutes")
+            .eq("barbershop_id", shopId)
+            .order("name"),
+        ]);
 
         if (cancelled) return;
-
-        if (debug && bErr) console.log("barbers error:", bErr);
-        if (debug && sErr) console.log("services error:", sErr);
 
         setBarbers(Array.isArray(b) ? (b as Barber[]) : []);
         setServices(Array.isArray(s) ? (s as Service[]) : []);
 
-        // reseta seleções quando carregar/alterar slug
+        // reset
         setSelectedBarber("");
         setSelectedService("");
         setDate("");
@@ -184,15 +152,12 @@ export default function PublicBookingPage() {
     }
 
     load();
-
     return () => {
       cancelled = true;
     };
-  }, [slug, supabase, debug]);
+  }, [slug, supabase]);
 
-  // =========================
-  // LOAD DAY DATA (working_hours + appointments)
-  // =========================
+  // LOAD DAY DATA
   useEffect(() => {
     let cancelled = false;
 
@@ -206,40 +171,33 @@ export default function PublicBookingPage() {
       const d = new Date(date);
       const weekday = d.getDay() === 0 ? 7 : d.getDay(); // 1-7
 
-      const [{ data: wh, error: whErr }, { data: ap, error: apErr }] =
-        await Promise.all([
-          supabase
-            .from("working_hours")
-            .select("weekday, start_time, end_time")
-            .eq("barber_id", selectedBarber)
-            .eq("weekday", weekday),
-          supabase
-            .from("appointments")
-            .select("start_time, end_time")
-            .eq("barber_id", selectedBarber)
-            .eq("date", date)
-            .eq("status", "scheduled"),
-        ]);
+      const [{ data: wh }, { data: ap }] = await Promise.all([
+        supabase
+          .from("working_hours")
+          .select("weekday, start_time, end_time")
+          .eq("barber_id", selectedBarber)
+          .eq("weekday", weekday),
+        supabase
+          .from("appointments")
+          .select("start_time, end_time")
+          .eq("barber_id", selectedBarber)
+          .eq("date", date)
+          .eq("status", "scheduled"),
+      ]);
 
       if (cancelled) return;
-
-      if (debug && whErr) console.log("working_hours error:", whErr);
-      if (debug && apErr) console.log("appointments error:", apErr);
 
       setWorkingHours(Array.isArray(wh) ? (wh as WorkingHour[]) : []);
       setAppointments(Array.isArray(ap) ? (ap as Appointment[]) : []);
     }
 
     loadDay();
-
     return () => {
       cancelled = true;
     };
-  }, [selectedBarber, date, supabase, debug]);
+  }, [selectedBarber, date, supabase]);
 
-  // =========================
   // BUILD SLOTS
-  // =========================
   const slots: string[] = useMemo(() => {
     if (!selectedService) return [];
     if (workingHours.length === 0) return [];
@@ -249,11 +207,10 @@ export default function PublicBookingPage() {
 
     const duration = service.duration_minutes;
 
-    const occupied =
-      appointments.map((a) => ({
-        start: timeToMinutes(a.start_time),
-        end: timeToMinutes(a.end_time),
-      })) || [];
+    const occupied = appointments.map((a) => ({
+      start: timeToMinutes(a.start_time),
+      end: timeToMinutes(a.end_time),
+    }));
 
     const result: string[] = [];
 
@@ -277,9 +234,7 @@ export default function PublicBookingPage() {
     return result;
   }, [workingHours, appointments, selectedService, services]);
 
-  // =========================
   // SUBMIT
-  // =========================
   async function handleSubmit() {
     if (!selectedBarber || !selectedService || !date || !time) {
       alert("Preencha tudo.");
@@ -316,7 +271,7 @@ export default function PublicBookingPage() {
     alert("✅ Agendado com sucesso!");
     setLoading(false);
 
-    // recarrega o dia para refletir o horário ocupado
+    // refresh day
     const d = new Date(date);
     const weekday = d.getDay() === 0 ? 7 : d.getDay();
 
@@ -339,9 +294,7 @@ export default function PublicBookingPage() {
     setTime("");
   }
 
-  // =========================
   // UI
-  // =========================
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-8 max-w-4xl mx-auto space-y-6">
       <div className="space-y-2">
@@ -350,13 +303,6 @@ export default function PublicBookingPage() {
             ? `Agende em ${barbershop.name}`
             : "Agende seu horário"}
         </h1>
-
-        {debug && (
-          <p className="text-xs opacity-70">
-            Debug: slug={slug} | barbers={barbers.length} | services=
-            {services.length}
-          </p>
-        )}
 
         {errorMsg && (
           <div className="p-3 rounded bg-red-500/15 border border-red-500/30 text-red-200">
@@ -385,7 +331,6 @@ export default function PublicBookingPage() {
           <div className="space-y-2">
             <div className="text-sm font-semibold text-white/80">Barbeiro</div>
 
-            {/* Desktop select */}
             <div className="hidden md:block">
               <select
                 className="w-full p-3 rounded bg-zinc-900 border border-white/10 text-white"
@@ -402,7 +347,6 @@ export default function PublicBookingPage() {
               </select>
             </div>
 
-            {/* Mobile buttons */}
             <div className="md:hidden grid grid-cols-1 gap-2">
               {barbers.length === 0 ? (
                 <p className="opacity-60">Nenhum barbeiro disponível.</p>
@@ -431,7 +375,6 @@ export default function PublicBookingPage() {
           <div className="space-y-2">
             <div className="text-sm font-semibold text-white/80">Serviço</div>
 
-            {/* Desktop select */}
             <div className="hidden md:block">
               <select
                 className="w-full p-3 rounded bg-zinc-900 border border-white/10 text-white"
@@ -448,7 +391,6 @@ export default function PublicBookingPage() {
               </select>
             </div>
 
-            {/* Mobile buttons */}
             <div className="md:hidden grid grid-cols-1 gap-2">
               {services.length === 0 ? (
                 <p className="opacity-60">Nenhum serviço disponível.</p>
@@ -526,7 +468,6 @@ export default function PublicBookingPage() {
             )}
           </div>
 
-          {/* SUBMIT */}
           <button
             disabled={
               loading || !selectedBarber || !selectedService || !date || !time
