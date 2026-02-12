@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   const { data: invited, error: inviteErr } = await adminSupabase.auth.admin.inviteUserByEmail(
     adminEmail,
     {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || ""}/login`,
+      redirectTo: `${new URL(req.url).origin}/callback?next=/update-password`,
       data: {
         role: "admin",
         barbershop_id: shop.id,
