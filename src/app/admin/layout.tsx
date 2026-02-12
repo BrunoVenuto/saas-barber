@@ -121,6 +121,76 @@ function useOnboardingGuard() {
 
       // ✅ Admin SaaS: libera tudo
       if (typedProf.role === "admin" && typedProf.barbershop_id === null) {
+        // Checa cookie de impersonation
+        const impersonatingId = document.cookie
+          .split("; ")
+          .find((row) => row.startsWith("sb-impersonate-shop-id="))
+          ?.split("=")[1];
+
+        if (impersonatingId) {
+          // Se estiver impersonando, finge que é admin dessa barbearia
+          const { data: impShop } = await supabase
+            .from("barbershops")
+            .select("id, name, onboarded_at, onboarding_step")
+            .eq("id", impersonatingId)
+            .single();
+
+          if (impShop) {
+            setProfile({
+              role: "admin",
+              barbershop_id: impShop.id,
+              // @ts-ignore
+              _impersonating: true,
+              // @ts-ignore
+              _shopName: impShop.name,
+            });
+            // deixa passar para ver se cai nas regras de onboarding dessa loja
+            // (continua a checagem abaixo)
+            const s = impShop as Shop;
+            if (s.onboarded_at) {
+              setChecking(false);
+              return;
+            }
+            // ✅ Ainda NÃO onboarded: permitir páginas do passo atual
+            const step = s?.onboarding_step ?? 1;
+
+            const allowedByStep = (() => {
+              // sempre permite acessar a "Minha Barbearia" durante onboarding
+              if (pathname?.startsWith("/admin/minha-barbearia")) return true;
+
+              if (step <= 1) return pathname?.startsWith("/admin/onboarding") ?? false;
+
+              if (step === 2) {
+                return (
+                  (pathname?.startsWith("/admin/servicos") ?? false) ||
+                  (pathname?.startsWith("/admin/onboarding") ?? false)
+                );
+              }
+
+              if (step === 3) {
+                return (
+                  (pathname?.startsWith("/admin/barbeiros") ?? false) ||
+                  (pathname?.startsWith("/admin/onboarding") ?? false)
+                );
+              }
+
+              // step 4
+              return (
+                (pathname?.startsWith("/admin/horarios") ?? false) ||
+                (pathname?.startsWith("/admin/onboarding") ?? false)
+              );
+            })();
+
+            if (!allowedByStep) {
+              router.replace("/admin/onboarding");
+              return;
+            }
+
+            setChecking(false);
+            return;
+          }
+        }
+
         setChecking(false);
         return;
       }
@@ -262,6 +332,24 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-black text-white">
+      {/* ⚠️ IMPERSONATION BANNER */}
+      {/* @ts-ignore */}
+      {profile?._impersonating && (
+        <div className="bg-yellow-400 text-black px-4 py-2 text-sm font-black flex items-center justify-between">
+          <span>
+            🔧 Configurando: {(profile as any)._shopName}
+          </span>
+          <button
+            onClick={() => {
+              document.cookie = "sb-impersonate-shop-id=; path=/; max-age=0";
+              window.location.reload();
+            }}
+            className="underline hover:no-underline"
+          >
+            Sair do modo configuração
+          </button>
+        </div>
+      )}
       {/* MOBILE HEADER */}
       <header className="md:hidden sticky top-0 z-40 bg-black/60 backdrop-blur-md border-b border-white/10">
         <div className="px-4 py-3 flex items-center justify-between gap-3">

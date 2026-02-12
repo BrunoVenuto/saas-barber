@@ -4,6 +4,36 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
+type HashParams = {
+  access_token?: string;
+  refresh_token?: string;
+  type?: string;
+  error?: string;
+  error_description?: string;
+};
+
+function parseHash(hash: string): HashParams {
+  const out: HashParams = {};
+  const clean = (hash || "").replace(/^#/, "");
+  if (!clean) return out;
+
+  const params = new URLSearchParams(clean);
+
+  const access_token = params.get("access_token") ?? undefined;
+  const refresh_token = params.get("refresh_token") ?? undefined;
+  const type = params.get("type") ?? undefined;
+  const error = params.get("error") ?? undefined;
+  const error_description = params.get("error_description") ?? undefined;
+
+  if (access_token) out.access_token = access_token;
+  if (refresh_token) out.refresh_token = refresh_token;
+  if (type) out.type = type;
+  if (error) out.error = error;
+  if (error_description) out.error_description = error_description;
+
+  return out;
+}
+
 export default function UpdatePasswordPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -15,12 +45,39 @@ export default function UpdatePasswordPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  // ✅ garante sessão (link do email) e evita ficar preso aqui sem necessidade
+  // ✅ Processa hash (convite) OU sessão existente
   useEffect(() => {
     (async () => {
       setMsg(null);
 
-      // precisa ter sessão após o link do convite
+      // 1) Checa se veio hash na URL (fluxo de convite direto)
+      const hash = typeof window !== "undefined" ? window.location.hash : "";
+      const h = parseHash(hash);
+
+      if (h.error) {
+        setMsg(h.error_description || h.error || "Erro no link de convite.");
+        setLoading(false);
+        return;
+      }
+
+      if (h.access_token && h.refresh_token) {
+        // Tenta criar sessão com os tokens do hash
+        const { error } = await supabase.auth.setSession({
+          access_token: h.access_token,
+          refresh_token: h.refresh_token,
+        });
+
+        if (error) {
+          setMsg("Falha ao autenticar pelo link: " + error.message);
+          setLoading(false);
+          return;
+        }
+
+        // Limpa hash da URL (opcional, estética)
+        window.history.replaceState({}, "", "/update-password");
+      }
+
+      // 2) Valida se temos sessão (seja pelo hash acima ou login prévio)
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
 
       if (sessionErr) {
@@ -30,13 +87,12 @@ export default function UpdatePasswordPage() {
       }
 
       if (!sessionData.session) {
-        setMsg("Sessão inválida. Abra o link do email novamente.");
+        setMsg("Link inválido ou expirado. Peça um novo convite.");
         setLoading(false);
         return;
       }
 
-      // Se já existe profile e role, e o cara já tá onboarded, pode mandar pro painel
-      // (não é obrigatório, mas evita usuário cair aqui por engano)
+      // 3) Se já existe profile e role, e o cara já tá onboarded, pode mandar pro painel
       const { data: userData } = await supabase.auth.getUser();
       const user = userData?.user;
 
@@ -47,12 +103,8 @@ export default function UpdatePasswordPage() {
           .eq("id", user.id)
           .maybeSingle();
 
-        // se já tem profile admin, manda pro onboarding (ou dashboard se você preferir)
-        if (profile?.role === "admin") {
-          // se quiser mandar direto pro dashboard, troque aqui:
-          // router.replace("/admin/dashboard");
-          // return;
-        }
+        // Se já é admin, teoricamente poderia ir pro dashboard/onboarding direto 
+        // mas aqui deixamos ele definir a senha.
       }
 
       setLoading(false);
@@ -144,7 +196,7 @@ export default function UpdatePasswordPage() {
         </button>
 
         <p className="text-xs text-zinc-500">
-          Se aparecer “Sessão inválida”, volte no email e abra o link novamente.
+          Se aparecer “Link inválido”, verifique se o email não expirou.
         </p>
       </div>
     </div>

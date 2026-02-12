@@ -157,8 +157,7 @@ export default function SaaSBarbershopsPage() {
     };
 
     setMsg(
-      `✅ Barbearia criada: ${okJson.shop?.name ?? name} (slug: ${
-        okJson.shop?.slug ?? slug
+      `✅ Barbearia criada: ${okJson.shop?.name ?? name} (slug: ${okJson.shop?.slug ?? slug
       }). Convite enviado para ${okJson.invited_admin_email ?? adminEmail}`,
     );
 
@@ -398,11 +397,10 @@ export default function SaaSBarbershopsPage() {
                     <span className="min-w-0 break-words">{s.name}</span>
 
                     <span
-                      className={`text-xs px-2 py-1 rounded-full border ${
-                        s.is_active
+                      className={`text-xs px-2 py-1 rounded-full border ${s.is_active
                           ? "border-emerald-500 text-emerald-400"
                           : "border-zinc-600 text-zinc-400"
-                      }`}
+                        }`}
                     >
                       {s.is_active ? "ATIVA" : "DESATIVADA"}
                     </span>
@@ -436,6 +434,16 @@ export default function SaaSBarbershopsPage() {
                   >
                     Agendar
                   </a>
+
+                  <button
+                    className="text-center w-full px-4 py-3 rounded-lg bg-zinc-800 border border-white/10 hover:bg-zinc-700 transition font-black"
+                    onClick={() => {
+                      document.cookie = `sb-impersonate-shop-id=${s.id}; path=/`;
+                      window.location.href = "/admin/dashboard";
+                    }}
+                  >
+                    ⚙️ Configurar
+                  </button>
 
                   <button
                     className="sm:col-span-1 col-span-2 lg:col-auto w-full px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition font-black disabled:opacity-50"
