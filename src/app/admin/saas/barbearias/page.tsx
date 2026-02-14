@@ -27,6 +27,10 @@ const PLAN_PRICE: Record<Plan, number> = {
   premium: 129,
 };
 
+function isPlan(v: string): v is Plan {
+  return v === "start" || v === "pro" || v === "premium";
+}
+
 function planLabel(p: Plan) {
   switch (p) {
     case "start":
@@ -40,10 +44,6 @@ function planLabel(p: Plan) {
 
 function moneyBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function isPlan(v: string): v is Plan {
-  return v === "start" || v === "pro" || v === "premium";
 }
 
 function getErrorMessage(json: unknown): string {
@@ -66,6 +66,7 @@ export default function SaaSBarbershopsPage() {
   const [slug, setSlug] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminName, setAdminName] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
 
   async function load() {
     setLoading(true);
@@ -129,6 +130,10 @@ export default function SaaSBarbershopsPage() {
     if (!name.trim()) return setMsg("Informe o nome da barbearia.");
     if (!adminEmail.trim())
       return setMsg("Informe o email do admin da barbearia.");
+    if (!adminPassword.trim())
+      return setMsg("Informe a senha do admin da barbearia.");
+    if (adminPassword.trim().length < 6)
+      return setMsg("Senha fraca. Use pelo menos 6 caracteres.");
 
     setLoading(true);
 
@@ -140,6 +145,7 @@ export default function SaaSBarbershopsPage() {
         slug: slug.trim() || undefined,
         adminEmail: adminEmail.trim(),
         adminName: adminName.trim() || undefined,
+        adminPassword: adminPassword.trim(),
       }),
     });
 
@@ -153,98 +159,21 @@ export default function SaaSBarbershopsPage() {
 
     const okJson = json as {
       shop?: { name?: string; slug?: string };
-      invited_admin_email?: string;
+      created_admin_email?: string;
     };
 
     setMsg(
-      `✅ Barbearia criada: ${okJson.shop?.name ?? name} (slug: ${okJson.shop?.slug ?? slug
-      }). Convite enviado para ${okJson.invited_admin_email ?? adminEmail}`,
+      `✅ Barbearia criada: ${okJson.shop?.name ?? name} (slug: ${
+        okJson.shop?.slug ?? slug
+      }). Admin criado: ${okJson.created_admin_email ?? adminEmail} (senha definida).`,
     );
 
     setName("");
     setSlug("");
     setAdminEmail("");
     setAdminName("");
+    setAdminPassword("");
 
-    await load();
-    setLoading(false);
-  }
-
-  async function handleDeactivate(shop: Shop) {
-    setMsg(null);
-
-    const ok = confirm(
-      `Desativar a barbearia "${shop.name}"?\n\nEla vai parar de aparecer publicamente.`,
-    );
-    if (!ok) return;
-
-    setLoading(true);
-
-    const res = await fetch(`/api/saas/barbershops/${shop.id}/deactivate`, {
-      method: "POST",
-    });
-
-    const json: unknown = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      setMsg(getErrorMessage(json) || "Falha ao desativar.");
-      setLoading(false);
-      return;
-    }
-
-    setMsg(`✅ Barbearia desativada: ${shop.name}`);
-    await load();
-    setLoading(false);
-  }
-
-  async function handleReactivate(shop: Shop) {
-    setMsg(null);
-
-    const ok = confirm(`Reativar a barbearia "${shop.name}"?`);
-    if (!ok) return;
-
-    setLoading(true);
-
-    const res = await fetch(`/api/saas/barbershops/${shop.id}/reactivate`, {
-      method: "POST",
-    });
-
-    const json: unknown = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      setMsg(getErrorMessage(json) || "Falha ao reativar.");
-      setLoading(false);
-      return;
-    }
-
-    setMsg(`✅ Barbearia reativada: ${shop.name}`);
-    await load();
-    setLoading(false);
-  }
-
-  async function handleDelete(shop: Shop) {
-    setMsg(null);
-
-    const typed = prompt(
-      `⚠️ EXCLUIR DEFINITIVO\n\nIsso pode falhar se houver agendamentos/serviços/barbeiros ligados.\n\nPara confirmar, digite: DELETE\n\nBarbearia: ${shop.name}`,
-    );
-    if (typed !== "DELETE") return;
-
-    setLoading(true);
-
-    const res = await fetch(`/api/saas/barbershops/${shop.id}/delete`, {
-      method: "POST",
-    });
-
-    const json: unknown = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      setMsg(getErrorMessage(json) || "Falha ao excluir.");
-      setLoading(false);
-      return;
-    }
-
-    setMsg(`✅ Barbearia excluída: ${shop.name}`);
     await load();
     setLoading(false);
   }
@@ -257,12 +186,11 @@ export default function SaaSBarbershopsPage() {
             SaaS <span className="text-yellow-400">Barbearias</span>
           </h1>
           <p className="text-sm sm:text-base text-zinc-400">
-            Você (admin da plataforma) cria barbearias e convida o admin do
-            cliente.
+            Você (admin da plataforma) cria barbearias e define a senha do admin
+            do cliente.
           </p>
         </header>
 
-        {/* RESUMO FINANCEIRO (tablet-safe) */}
         <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="bg-zinc-950 border border-white/10 rounded-2xl p-4">
             <div className="text-xs text-zinc-400">Total</div>
@@ -307,7 +235,6 @@ export default function SaaSBarbershopsPage() {
           </div>
         )}
 
-        {/* FORM (tablet-safe: só vira 2 colunas no lg) */}
         <section className="bg-zinc-950 border border-white/10 rounded-2xl p-4 lg:p-6 space-y-4">
           <h2 className="text-lg lg:text-xl font-black">
             Criar nova barbearia
@@ -355,6 +282,19 @@ export default function SaaSBarbershopsPage() {
                 placeholder="Ex: João"
               />
             </div>
+
+            {/* ✅ CAMPO SENHA */}
+            <div className="lg:col-span-2">
+              <label className="text-sm text-zinc-400">Admin (senha)</label>
+              <input
+                type="password"
+                className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-3 outline-none"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="mínimo 6 caracteres"
+                autoComplete="new-password"
+              />
+            </div>
           </div>
 
           <button
@@ -362,13 +302,12 @@ export default function SaaSBarbershopsPage() {
             disabled={loading}
             className="w-full sm:w-auto h-12 px-6 rounded-xl bg-yellow-400 text-black font-black hover:opacity-95 transition disabled:opacity-50"
           >
-            {loading ? "Criando..." : "Criar barbearia + convidar admin"}
+            {loading ? "Criando..." : "Criar barbearia + criar admin"}
           </button>
         </section>
 
-        {/* LIST */}
         <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
-          <div className="p-4 border-b border-white/10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="p-4 border-b border-white/10 flex items-center justify-between gap-3">
             <h2 className="text-lg lg:text-xl font-black">
               Barbearias cadastradas
             </h2>
@@ -376,7 +315,7 @@ export default function SaaSBarbershopsPage() {
             <button
               onClick={load}
               disabled={loading}
-              className="w-full sm:w-auto px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition disabled:opacity-50"
+              className="px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition disabled:opacity-50"
             >
               {loading ? "Atualizando..." : "Atualizar"}
             </button>
@@ -397,10 +336,11 @@ export default function SaaSBarbershopsPage() {
                     <span className="min-w-0 break-words">{s.name}</span>
 
                     <span
-                      className={`text-xs px-2 py-1 rounded-full border ${s.is_active
+                      className={`text-xs px-2 py-1 rounded-full border ${
+                        s.is_active
                           ? "border-emerald-500 text-emerald-400"
                           : "border-zinc-600 text-zinc-400"
-                        }`}
+                      }`}
                     >
                       {s.is_active ? "ATIVA" : "DESATIVADA"}
                     </span>
@@ -415,7 +355,6 @@ export default function SaaSBarbershopsPage() {
                   </div>
                 </div>
 
-                {/* Botões: tablet-safe (grid), desktop (flex) */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 lg:flex lg:flex-wrap lg:justify-end">
                   <a
                     className="text-center w-full px-4 py-3 rounded-lg bg-emerald-500 text-black font-black"
@@ -444,47 +383,11 @@ export default function SaaSBarbershopsPage() {
                   >
                     ⚙️ Configurar
                   </button>
-
-                  <button
-                    className="sm:col-span-1 col-span-2 lg:col-auto w-full px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition font-black disabled:opacity-50"
-                    disabled={loading || !s.is_active}
-                    onClick={() => handleDeactivate(s)}
-                    title={
-                      !s.is_active
-                        ? "Já está desativada"
-                        : "Desativar barbearia"
-                    }
-                  >
-                    Desativar
-                  </button>
-
-                  <button
-                    className="sm:col-span-1 col-span-2 lg:col-auto w-full px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition font-black disabled:opacity-50"
-                    disabled={loading || s.is_active}
-                    onClick={() => handleReactivate(s)}
-                    title={s.is_active ? "Já está ativa" : "Reativar barbearia"}
-                  >
-                    Reativar
-                  </button>
-
-                  <button
-                    className="col-span-2 sm:col-span-1 lg:col-auto w-full px-4 py-3 rounded-lg bg-red-600 text-white font-black hover:opacity-90 transition disabled:opacity-50"
-                    disabled={loading}
-                    onClick={() => handleDelete(s)}
-                  >
-                    Excluir
-                  </button>
                 </div>
               </div>
             ))}
           </div>
         </section>
-
-        <div className="text-xs text-zinc-500">
-          * Recomendado: desativar primeiro. Excluir definitivo pode falhar se
-          houver registros vinculados (agendamentos, barbeiros, serviços,
-          horários etc).
-        </div>
       </div>
     </div>
   );
