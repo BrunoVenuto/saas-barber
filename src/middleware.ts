@@ -23,7 +23,6 @@ type ProfileRow = {
 };
 
 export async function middleware(req: NextRequest) {
-  // Cookies que o Supabase pedir para setar (aplicamos no response final)
   const pendingCookies: SupabaseCookieToSet[] = [];
 
   const applyPendingCookies = (response: NextResponse) => {
@@ -58,15 +57,14 @@ export async function middleware(req: NextRequest) {
   /**
    * ✅ IMPORTANTE:
    * Para rotas /api, a gente NÃO redireciona.
-   * A gente só força o supabase.auth.getUser() para permitir refresh de cookies,
-   * e deixa o próprio route handler devolver 401/403/409/etc em JSON.
+   * Só força getUser() para permitir refresh de cookies e deixa a API responder JSON.
    */
   if (isApiRoute) {
-    await supabase.auth.getUser(); // força refresh se necessário
+    await supabase.auth.getUser();
     return applyPendingCookies(NextResponse.next());
   }
 
-  // Se não for rota protegida, segue
+  // Fora de /admin e /barbeiro, não exige auth
   if (!isAdminRoute && !isBarberRoute) {
     return applyPendingCookies(NextResponse.next());
   }
@@ -120,13 +118,12 @@ export async function middleware(req: NextRequest) {
   // BARBER ROUTES (/barbeiro)
   // =========================
   if (isBarberRoute) {
-    // Caso 1: perfil já é barber -> ok
+    // Caso 1: perfil barber -> ok
     if (profile.role === "barber") {
       return applyPendingCookies(NextResponse.next());
     }
 
-    // Caso 2 (RECOMENDADO): dono/admin também atende
-    // Se for admin e existir barbers.profile_id = auth.uid(), permite entrar
+    // Caso 2: admin também atende (se existir registro em barbers com profile_id = user.id)
     if (profile.role === "admin") {
       const { data: barberRow, error: barberErr } = await supabase
         .from("barbers")
@@ -139,7 +136,7 @@ export async function middleware(req: NextRequest) {
       }
     }
 
-    // Caso contrário, não tem permissão de barbeiro
+    // Sem permissão de barbeiro
     const url = req.nextUrl.clone();
     url.pathname = "/admin/agenda";
     return applyPendingCookies(NextResponse.redirect(url));
@@ -148,6 +145,11 @@ export async function middleware(req: NextRequest) {
   return applyPendingCookies(NextResponse.next());
 }
 
+/**
+ * ✅ Matcher GLOBAL:
+ * - garante que o Supabase SSR consiga manter/refreshar cookies em produção
+ * - exclui assets do Next e favicon
+ */
 export const config = {
-  matcher: ["/admin/:path*", "/barbeiro/:path*", "/api/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
