@@ -1,164 +1,236 @@
-import { NextResponse } from "next/server";
-import { createClient as createAuthedClient } from "@/lib/supabase/server";
-import {
-  createClient as createServiceClient,
-  type SupabaseClient,
-} from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { createClient, PostgrestError } from "@supabase/supabase-js";
 
-type ProfileRow = {
-  role: string | null;
+type SupabaseCookieOptions = Partial<{
+  path: string;
+  domain: string;
+  maxAge: number;
+  expires: Date;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: boolean | "lax" | "strict" | "none";
+}>;
+
+type SupabaseCookieToSet = {
+  name: string;
+  value: string;
+  options: SupabaseCookieOptions;
+};
+
+type ProfileMeRow = {
+  id: string;
+  role: string;
   barbershop_id: string | null;
 };
 
-async function safeCount(
-  adminSupabase: SupabaseClient,
-  table: string,
-  barbershopId: string,
-): Promise<number> {
-  const { count, error } = await adminSupabase
-    .from(table)
-    .select("id", { count: "exact", head: true })
-    .eq("barbershop_id", barbershopId);
+type ProfileIdRow = {
+  id: string;
+};
 
-  // Se a tabela não existir ou der erro, não bloqueia exclusão
-  if (error) return 0;
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  const barbershopId = params.id;
 
-  return typeof count === "number" ? count : 0;
-}
+  const cookieStore = cookies();
+  const pendingCookies: SupabaseCookieToSet[] = [];
 
-export async function POST(req: Request, context: { params: { id: string } }) {
+  const applyPendingCookies = (res: NextResponse) => {
+    for (const c of pendingCookies) {
+      res.cookies.set({ name: c.name, value: c.value, ...c.options });
+    }
+    return res;
+  };
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore
+            .getAll()
+            .map((c) => ({ name: c.name, value: c.value }));
+        },
+        setAll(cookiesToSet: SupabaseCookieToSet[]) {
+          pendingCookies.push(...cookiesToSet);
+        },
+      },
+    },
+  );
+
   try {
-    const supabase = createAuthedClient();
-
-    // 1️⃣ Verifica autenticação
+    // AUTH
     const { data: authData, error: authErr } = await supabase.auth.getUser();
+    const user = authData.user;
 
-    if (authErr || !authData.user) {
-      return NextResponse.json(
-        { error: authErr?.message ?? "Não autenticado.", step: "auth" },
-        { status: 401 },
+    if (authErr || !user) {
+      return applyPendingCookies(
+        NextResponse.json(
+          {
+            error: "unauthorized",
+            step: "auth",
+            details: authErr?.message ?? null,
+          },
+          { status: 401 },
+        ),
       );
     }
 
-    // 2️⃣ Verifica permissão (admin da plataforma)
-    const { data: profile, error: profErr } = await supabase
+    // PERMISSÃO
+    const { data: me, error: meErr } = await supabase
       .from("profiles")
-      .select("role, barbershop_id")
-      .eq("id", authData.user.id)
-      .single();
+      .select("id, role, barbershop_id")
+      .eq("id", user.id)
+      .single<ProfileMeRow>();
 
-    if (profErr || !profile) {
-      return NextResponse.json(
-        {
-          error: profErr?.message ?? "Perfil não encontrado.",
-          step: "profile",
-        },
-        { status: 403 },
+    if (meErr || !me) {
+      return applyPendingCookies(
+        NextResponse.json(
+          {
+            error: "profile_not_found",
+            step: "profile",
+            details: meErr?.message ?? null,
+          },
+          { status: 403 },
+        ),
       );
     }
 
-    const profRow = profile as ProfileRow;
-
-    const isPlatformAdmin =
-      profRow.role === "admin" && profRow.barbershop_id === null;
-
+    const isPlatformAdmin = me.role === "admin" && me.barbershop_id === null;
     if (!isPlatformAdmin) {
-      return NextResponse.json(
-        {
-          error: "Sem permissão (apenas admin plataforma).",
-          step: "permission",
-        },
-        { status: 403 },
+      return applyPendingCookies(
+        NextResponse.json(
+          {
+            error: "forbidden",
+            step: "permission",
+            details: { role: me.role, barbershop_id: me.barbershop_id },
+          },
+          { status: 403 },
+        ),
       );
     }
 
-    // 3️⃣ Valida ID
-    const id = (context?.params?.id ?? "").trim();
-
-    if (!id) {
-      return NextResponse.json(
-        { error: "ID inválido.", step: "params" },
-        { status: 400 },
-      );
-    }
-
-    // 4️⃣ Service Role (bypass RLS)
+    // SERVICE ROLE
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!url || !serviceKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Env faltando: NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY",
-          step: "env",
-        },
-        { status: 500 },
+      return applyPendingCookies(
+        NextResponse.json(
+          {
+            error: "missing_env",
+            step: "env",
+            details: {
+              hasUrl: Boolean(url),
+              hasServiceRoleKey: Boolean(serviceKey),
+            },
+          },
+          { status: 500 },
+        ),
       );
     }
 
-    const adminSupabase = createServiceClient(url, serviceKey, {
-      auth: { persistSession: false },
+    const admin = createClient(url, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 5️⃣ Verifica vínculos antes de excluir
-    const tablesToCheck = [
-      "appointments",
-      "services",
-      "barbers",
-      "working_hours",
-      "clients",
-    ];
+    // LISTAR PROFILES DA BARBEARIA
+    const { data: shopProfiles, error: shopProfilesErr } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("barbershop_id", barbershopId)
+      .returns<ProfileIdRow[]>();
 
-    const counts: Record<string, number> = {};
-
-    for (const table of tablesToCheck) {
-      counts[table] = await safeCount(adminSupabase, table, id);
-    }
-
-    const totalLinks = Object.values(counts).reduce(
-      (acc, value) => acc + value,
-      0,
-    );
-
-    if (totalLinks > 0) {
-      return NextResponse.json(
-        {
-          error:
-            "Não é possível excluir: existem registros vinculados a essa barbearia.",
-          step: "blocked",
-          details: counts,
-        },
-        { status: 409 },
+    if (shopProfilesErr) {
+      const err = shopProfilesErr as PostgrestError;
+      return applyPendingCookies(
+        NextResponse.json(
+          {
+            error: "failed_list_users",
+            step: "list_users",
+            details: { message: err.message, code: err.code },
+          },
+          { status: 400 },
+        ),
       );
     }
 
-    // 6️⃣ Remove profiles vinculados (opcional)
-    await adminSupabase.from("profiles").delete().eq("barbershop_id", id);
+    const userIds = (shopProfiles ?? []).map((p) => p.id);
 
-    // 7️⃣ Remove barbearia
-    const { error: delErr } = await adminSupabase
+    // DELETAR AUTH USERS
+    const deleteUserResults: Array<{
+      userId: string;
+      ok: boolean;
+      error?: string;
+    }> = [];
+
+    for (const uid of userIds) {
+      const { error } = await admin.auth.admin.deleteUser(uid);
+      if (error) {
+        deleteUserResults.push({
+          userId: uid,
+          ok: false,
+          error: error.message,
+        });
+      } else {
+        deleteUserResults.push({ userId: uid, ok: true });
+      }
+    }
+
+    // DELETAR BARBERSHOP (CASCADE NO BANCO)
+    const { data: deletedShop, error: delShopErr } = await admin
       .from("barbershops")
       .delete()
-      .eq("id", id);
+      .eq("id", barbershopId)
+      .select("id")
+      .maybeSingle<{ id: string }>();
 
-    if (delErr) {
-      return NextResponse.json(
-        { error: delErr.message, step: "delete" },
-        { status: 400 },
+    if (delShopErr) {
+      const err = delShopErr as PostgrestError;
+      const status = err.code === "23503" ? 409 : 400;
+
+      return applyPendingCookies(
+        NextResponse.json(
+          {
+            error: "delete_failed",
+            step: "delete_barbershop",
+            details: { message: err.message, code: err.code },
+          },
+          { status },
+        ),
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      id,
-      deleted: true,
-    });
+    if (!deletedShop?.id) {
+      return applyPendingCookies(
+        NextResponse.json(
+          { error: "not_found", step: "delete_barbershop" },
+          { status: 404 },
+        ),
+      );
+    }
+
+    return applyPendingCookies(
+      NextResponse.json(
+        {
+          ok: true,
+          deletedId: deletedShop.id,
+          deletedAuthUsers: deleteUserResults.filter((r) => r.ok).length,
+        },
+        { status: 200 },
+      ),
+    );
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Erro inesperado.";
-    return NextResponse.json(
-      { error: message, step: "catch" },
-      { status: 500 },
+    const message = e instanceof Error ? e.message : String(e);
+    return applyPendingCookies(
+      NextResponse.json(
+        { error: "internal_error", step: "catch", details: message },
+        { status: 500 },
+      ),
     );
   }
 }

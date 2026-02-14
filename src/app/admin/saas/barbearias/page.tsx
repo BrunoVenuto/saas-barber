@@ -21,6 +21,13 @@ type ShopRow = {
   plan: string | null;
 };
 
+type DeleteBlockedDetails = Record<string, number>;
+
+type ApiErrorResponse = {
+  error?: unknown;
+  details?: unknown;
+};
+
 const PLAN_PRICE: Record<Plan, number> = {
   start: 39,
   pro: 79,
@@ -53,6 +60,27 @@ function getErrorMessage(json: unknown): string {
     if (err) return String(err);
   }
   return "";
+}
+
+function formatBlockedDetails(details: DeleteBlockedDetails): string {
+  const entries = Object.entries(details).filter(
+    ([, v]) => typeof v === "number" && v > 0,
+  );
+  if (entries.length === 0) return "";
+
+  const lines = entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `- ${k}: ${v}`);
+
+  return lines.join("\n");
+}
+
+function isRecordNumberMap(v: unknown): v is Record<string, number> {
+  if (typeof v !== "object" || v === null) return false;
+  for (const value of Object.values(v as Record<string, unknown>)) {
+    if (typeof value !== "number") return false;
+  }
+  return true;
 }
 
 export default function SaaSBarbershopsPage() {
@@ -247,7 +275,26 @@ export default function SaaSBarbershopsPage() {
     const json: unknown = await res.json().catch(() => null);
 
     if (!res.ok) {
-      setMsg(getErrorMessage(json) || "Falha ao excluir.");
+      const msgBase = getErrorMessage(json) || "Falha ao excluir.";
+
+      // ✅ Se o backend mandou details, mostramos no aviso (sem mudar layout)
+      const parsed = (json ?? null) as ApiErrorResponse | null;
+      const detailsRaw = parsed?.details;
+
+      if (isRecordNumberMap(detailsRaw)) {
+        const details = detailsRaw as DeleteBlockedDetails;
+        const formatted = formatBlockedDetails(details);
+
+        if (formatted) {
+          setMsg(
+            `${msgBase}\n\nVínculos encontrados:\n${formatted}\n\nDica: desative a barbearia se quiser apenas “sumir” do público.`,
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
+      setMsg(msgBase);
       setLoading(false);
       return;
     }
@@ -309,12 +356,11 @@ export default function SaaSBarbershopsPage() {
         </section>
 
         {msg && (
-          <div className="bg-zinc-950 border border-white/10 rounded-xl p-4 text-sm text-zinc-200">
+          <div className="bg-zinc-950 border border-white/10 rounded-xl p-4 text-sm text-zinc-200 whitespace-pre-line">
             {msg}
           </div>
         )}
 
-        {/* FORM */}
         <section className="bg-zinc-950 border border-white/10 rounded-2xl p-4 lg:p-6 space-y-4">
           <h2 className="text-lg lg:text-xl font-black">
             Criar nova barbearia
@@ -385,7 +431,6 @@ export default function SaaSBarbershopsPage() {
           </button>
         </section>
 
-        {/* LIST */}
         <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
           <div className="p-4 border-b border-white/10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <h2 className="text-lg lg:text-xl font-black">

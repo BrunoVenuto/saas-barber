@@ -45,14 +45,26 @@ export async function middleware(req: NextRequest) {
           pendingCookies.push(...cookies);
         },
       },
-    }
+    },
   );
 
   const pathname = req.nextUrl.pathname;
 
+  const isApiRoute = pathname.startsWith("/api");
   const isAdminRoute = pathname.startsWith("/admin");
   const isSaasRoute = pathname.startsWith("/admin/saas");
   const isBarberRoute = pathname.startsWith("/barbeiro");
+
+  /**
+   * ✅ IMPORTANTE:
+   * Para rotas /api, a gente NÃO redireciona.
+   * A gente só força o supabase.auth.getUser() para permitir refresh de cookies,
+   * e deixa o próprio route handler devolver 401/403/409/etc em JSON.
+   */
+  if (isApiRoute) {
+    await supabase.auth.getUser(); // força refresh se necessário
+    return applyPendingCookies(NextResponse.next());
+  }
 
   // Se não for rota protegida, segue
   if (!isAdminRoute && !isBarberRoute) {
@@ -89,7 +101,8 @@ export async function middleware(req: NextRequest) {
   if (isAdminRoute) {
     if (profile.role !== "admin") {
       const url = req.nextUrl.clone();
-      url.pathname = profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
+      url.pathname =
+        profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
       return applyPendingCookies(NextResponse.redirect(url));
     }
 
@@ -136,5 +149,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/barbeiro/:path*"],
+  matcher: ["/admin/:path*", "/barbeiro/:path*", "/api/:path*"],
 };
