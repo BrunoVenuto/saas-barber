@@ -168,6 +168,7 @@ export default function SaaSBarbershopsPage() {
     const res = await fetch("/api/saas/barbershops/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include", // ✅ ESSENCIAL EM PROD
       body: JSON.stringify({
         name: name.trim(),
         slug: slug.trim() || undefined,
@@ -218,6 +219,7 @@ export default function SaaSBarbershopsPage() {
 
     const res = await fetch(`/api/saas/barbershops/${shop.id}/deactivate`, {
       method: "POST",
+      credentials: "include", // ✅
     });
 
     const json: unknown = await res.json().catch(() => null);
@@ -243,6 +245,7 @@ export default function SaaSBarbershopsPage() {
 
     const res = await fetch(`/api/saas/barbershops/${shop.id}/reactivate`, {
       method: "POST",
+      credentials: "include", // ✅
     });
 
     const json: unknown = await res.json().catch(() => null);
@@ -270,6 +273,7 @@ export default function SaaSBarbershopsPage() {
 
     const res = await fetch(`/api/saas/barbershops/${shop.id}/delete`, {
       method: "POST",
+      credentials: "include", // ✅
     });
 
     const json: unknown = await res.json().catch(() => null);
