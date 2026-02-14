@@ -34,114 +34,110 @@ function parseHash(hash: string): HashParams {
   return out;
 }
 
+type ViewState = "loading" | "ready" | "saving";
+
 export default function UpdatePasswordPage() {
   const supabase = createClient();
   const router = useRouter();
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [state, setState] = useState<ViewState>("loading");
   const [msg, setMsg] = useState<string | null>(null);
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  // ✅ Processa hash (convite) OU sessão existente
   useEffect(() => {
+    let alive = true;
+
     (async () => {
       setMsg(null);
 
-      // 1) Checa se veio hash na URL (fluxo de convite direto)
       const hash = typeof window !== "undefined" ? window.location.hash : "";
       const h = parseHash(hash);
 
       if (h.error) {
-        setMsg(h.error_description || h.error || "Erro no link de convite.");
-        setLoading(false);
+        if (!alive) return;
+        setMsg(h.error_description || h.error || "Erro no link.");
+        setState("ready");
         return;
       }
 
+      // Se veio token via hash, cria sessão
       if (h.access_token && h.refresh_token) {
-        // Tenta criar sessão com os tokens do hash
         const { error } = await supabase.auth.setSession({
           access_token: h.access_token,
           refresh_token: h.refresh_token,
         });
 
+        if (!alive) return;
+
         if (error) {
           setMsg("Falha ao autenticar pelo link: " + error.message);
-          setLoading(false);
+          setState("ready");
           return;
         }
 
-        // Limpa hash da URL (opcional, estética)
+        // limpa hash pra não ficar exposto na URL
         window.history.replaceState({}, "", "/update-password");
       }
 
-      // 2) Valida se temos sessão (seja pelo hash acima ou login prévio)
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      // valida se tem sessão
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
+
+      if (!alive) return;
 
       if (sessionErr) {
         setMsg("Erro ao validar sessão: " + sessionErr.message);
-        setLoading(false);
+        setState("ready");
         return;
       }
 
       if (!sessionData.session) {
         setMsg("Link inválido ou expirado. Peça um novo convite.");
-        setLoading(false);
+        setState("ready");
         return;
       }
 
-      // 3) Se já existe profile e role, e o cara já tá onboarded, pode mandar pro painel
-      const { data: userData } = await supabase.auth.getUser();
-      const user = userData?.user;
-
-      if (user?.id) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        // Se já é admin, teoricamente poderia ir pro dashboard/onboarding direto 
-        // mas aqui deixamos ele definir a senha.
-      }
-
-      setLoading(false);
+      setState("ready");
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    return () => {
+      alive = false;
+    };
+  }, [supabase]);
 
   async function handleSave() {
     setMsg(null);
 
-    if (password.length < 6) {
+    const pass = password.trim();
+    const conf = confirm.trim();
+
+    if (pass.length < 6) {
       setMsg("Senha fraca. Use pelo menos 6 caracteres.");
       return;
     }
 
-    if (password !== confirm) {
+    if (pass !== conf) {
       setMsg("As senhas não conferem.");
       return;
     }
 
-    setSaving(true);
+    setState("saving");
 
-    const { error } = await supabase.auth.updateUser({ password });
+    const { error } = await supabase.auth.updateUser({ password: pass });
 
     if (error) {
       setMsg("Erro ao salvar senha: " + error.message);
-      setSaving(false);
+      setState("ready");
       return;
     }
 
-    setSaving(false);
-
-    // ✅ após criar senha, vai para o onboarding do admin da barbearia
-    router.replace("/admin/onboarding");
+    // ✅ Sem onboarding: vai direto pra configuração normal
+    router.replace("/admin/minha-barbearia");
   }
 
-  if (loading) {
+  if (state === "loading") {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
         <div className="text-zinc-300">Carregando...</div>
@@ -160,7 +156,7 @@ export default function UpdatePasswordPage() {
         </p>
 
         {msg && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-zinc-200">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-zinc-200 text-sm">
             {msg}
           </div>
         )}
@@ -173,6 +169,7 @@ export default function UpdatePasswordPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="******"
+            autoComplete="new-password"
           />
         </div>
 
@@ -184,15 +181,16 @@ export default function UpdatePasswordPage() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="******"
+            autoComplete="new-password"
           />
         </div>
 
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={state === "saving"}
           className="h-12 w-full rounded-xl bg-yellow-400 text-black font-black disabled:opacity-50"
         >
-          {saving ? "Salvando..." : "Salvar senha"}
+          {state === "saving" ? "Salvando..." : "Salvar senha"}
         </button>
 
         <p className="text-xs text-zinc-500">
