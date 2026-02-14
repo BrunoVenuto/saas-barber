@@ -178,6 +178,85 @@ export default function SaaSBarbershopsPage() {
     setLoading(false);
   }
 
+  async function handleDeactivate(shop: Shop) {
+    setMsg(null);
+
+    const ok = confirm(
+      `Desativar a barbearia "${shop.name}"?\n\nEla vai parar de aparecer publicamente.`,
+    );
+    if (!ok) return;
+
+    setLoading(true);
+
+    const res = await fetch(`/api/saas/barbershops/${shop.id}/deactivate`, {
+      method: "POST",
+    });
+
+    const json: unknown = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setMsg(getErrorMessage(json) || "Falha ao desativar.");
+      setLoading(false);
+      return;
+    }
+
+    setMsg(`✅ Barbearia desativada: ${shop.name}`);
+    await load();
+    setLoading(false);
+  }
+
+  async function handleReactivate(shop: Shop) {
+    setMsg(null);
+
+    const ok = confirm(`Reativar a barbearia "${shop.name}"?`);
+    if (!ok) return;
+
+    setLoading(true);
+
+    const res = await fetch(`/api/saas/barbershops/${shop.id}/reactivate`, {
+      method: "POST",
+    });
+
+    const json: unknown = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setMsg(getErrorMessage(json) || "Falha ao reativar.");
+      setLoading(false);
+      return;
+    }
+
+    setMsg(`✅ Barbearia reativada: ${shop.name}`);
+    await load();
+    setLoading(false);
+  }
+
+  async function handleDelete(shop: Shop) {
+    setMsg(null);
+
+    const typed = prompt(
+      `⚠️ EXCLUIR DEFINITIVO\n\nIsso pode falhar se houver agendamentos/serviços/barbeiros ligados.\n\nPara confirmar, digite: DELETE\n\nBarbearia: ${shop.name}`,
+    );
+    if (typed !== "DELETE") return;
+
+    setLoading(true);
+
+    const res = await fetch(`/api/saas/barbershops/${shop.id}/delete`, {
+      method: "POST",
+    });
+
+    const json: unknown = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setMsg(getErrorMessage(json) || "Falha ao excluir.");
+      setLoading(false);
+      return;
+    }
+
+    setMsg(`✅ Barbearia excluída: ${shop.name}`);
+    await load();
+    setLoading(false);
+  }
+
   return (
     <div className="min-h-screen bg-black text-white p-4 lg:p-10 overflow-x-hidden">
       <div className="max-w-6xl mx-auto space-y-4 lg:space-y-6">
@@ -235,6 +314,7 @@ export default function SaaSBarbershopsPage() {
           </div>
         )}
 
+        {/* FORM */}
         <section className="bg-zinc-950 border border-white/10 rounded-2xl p-4 lg:p-6 space-y-4">
           <h2 className="text-lg lg:text-xl font-black">
             Criar nova barbearia
@@ -283,7 +363,6 @@ export default function SaaSBarbershopsPage() {
               />
             </div>
 
-            {/* ✅ CAMPO SENHA */}
             <div className="lg:col-span-2">
               <label className="text-sm text-zinc-400">Admin (senha)</label>
               <input
@@ -306,8 +385,9 @@ export default function SaaSBarbershopsPage() {
           </button>
         </section>
 
+        {/* LIST */}
         <section className="bg-zinc-950 border border-white/10 rounded-2xl overflow-hidden">
-          <div className="p-4 border-b border-white/10 flex items-center justify-between gap-3">
+          <div className="p-4 border-b border-white/10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <h2 className="text-lg lg:text-xl font-black">
               Barbearias cadastradas
             </h2>
@@ -315,7 +395,7 @@ export default function SaaSBarbershopsPage() {
             <button
               onClick={load}
               disabled={loading}
-              className="px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition disabled:opacity-50"
+              className="w-full sm:w-auto px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition disabled:opacity-50"
             >
               {loading ? "Atualizando..." : "Atualizar"}
             </button>
@@ -383,11 +463,42 @@ export default function SaaSBarbershopsPage() {
                   >
                     ⚙️ Configurar
                   </button>
+
+                  <button
+                    className="text-center w-full px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition font-black disabled:opacity-50"
+                    disabled={loading || !s.is_active}
+                    onClick={() => handleDeactivate(s)}
+                    title={!s.is_active ? "Já está desativada" : "Desativar"}
+                  >
+                    Desativar
+                  </button>
+
+                  <button
+                    className="text-center w-full px-4 py-3 rounded-lg bg-white/10 hover:bg-white/15 transition font-black disabled:opacity-50"
+                    disabled={loading || s.is_active}
+                    onClick={() => handleReactivate(s)}
+                    title={s.is_active ? "Já está ativa" : "Reativar"}
+                  >
+                    Reativar
+                  </button>
+
+                  <button
+                    className="text-center w-full px-4 py-3 rounded-lg bg-red-600 text-white font-black hover:opacity-90 transition disabled:opacity-50"
+                    disabled={loading}
+                    onClick={() => handleDelete(s)}
+                  >
+                    Excluir
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         </section>
+
+        <div className="text-xs text-zinc-500">
+          * Recomendado: desativar primeiro. Excluir definitivo pode falhar se
+          houver registros vinculados.
+        </div>
       </div>
     </div>
   );
