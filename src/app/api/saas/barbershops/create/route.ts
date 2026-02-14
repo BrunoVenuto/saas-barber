@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type PostgrestError } from "@supabase/supabase-js";
 
 type SupabaseCookieOptions = Partial<{
   path: string;
@@ -24,6 +24,14 @@ type ProfileRow = {
   barbershop_id: string | null;
 };
 
+type CreateBody = {
+  name?: string;
+  slug?: string;
+  adminEmail?: string;
+  adminName?: string;
+  adminPassword?: string;
+};
+
 export async function POST(req: NextRequest) {
   const cookieStore = cookies();
   const pendingCookies: SupabaseCookieToSet[] = [];
@@ -41,10 +49,9 @@ export async function POST(req: NextRequest) {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll().map((c) => ({
-            name: c.name,
-            value: c.value,
-          }));
+          return cookieStore
+            .getAll()
+            .map((c) => ({ name: c.name, value: c.value }));
         },
         setAll(cookiesToSet: SupabaseCookieToSet[]) {
           pendingCookies.push(...cookiesToSet);
@@ -54,7 +61,7 @@ export async function POST(req: NextRequest) {
   );
 
   try {
-    // AUTH
+    // AUTH (não aplica cookies no 401 para não "limpar" sessão)
     const { data: authData, error: authErr } = await supabase.auth.getUser();
     const user = authData.user;
 
@@ -65,7 +72,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // PERMISSÃO
+    // PERMISSÃO (admin plataforma)
     const { data: profile, error: profErr } = await supabase
       .from("profiles")
       .select("role, barbershop_id")
@@ -81,7 +88,6 @@ export async function POST(req: NextRequest) {
 
     const isPlatformAdmin =
       profile.role === "admin" && profile.barbershop_id === null;
-
     if (!isPlatformAdmin) {
       return NextResponse.json(
         { error: "Forbidden", step: "permission" },
@@ -89,50 +95,100 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // BODY
-    const body = await req.json();
-    const { name, email, password } = body;
+    // BODY (compatível com seu front)
+    const body = (await req.json().catch(() => null)) as CreateBody | null;
 
-    if (!name || !email || !password) {
+    const name = body?.name?.trim() ?? "";
+    const slug = (body?.slug ?? "").trim() || null;
+    const adminEmail = body?.adminEmail?.trim() ?? "";
+    const adminName = (body?.adminName ?? "").trim() || null;
+    const adminPassword = body?.adminPassword?.trim() ?? "";
+
+    if (!name) {
       return NextResponse.json(
-        { error: "Missing fields", step: "validation" },
+        {
+          error: "Missing fields",
+          step: "validation",
+          details: { field: "name" },
+        },
         { status: 400 },
       );
     }
-
-    // SERVICE ROLE
-    const admin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
-
-    // 1️⃣ Criar barbearia
-    const { data: shop, error: shopErr } = await admin
-      .from("barbershops")
-      .insert({ name })
-      .select("id")
-      .single();
-
-    if (shopErr || !shop) {
+    if (!adminEmail) {
       return NextResponse.json(
         {
-          error: shopErr?.message ?? "Shop insert failed",
-          step: "shop_insert",
+          error: "Missing fields",
+          step: "validation",
+          details: { field: "adminEmail" },
+        },
+        { status: 400 },
+      );
+    }
+    if (!adminPassword) {
+      return NextResponse.json(
+        {
+          error: "Missing fields",
+          step: "validation",
+          details: { field: "adminPassword" },
+        },
+        { status: 400 },
+      );
+    }
+    if (adminPassword.length < 6) {
+      return NextResponse.json(
+        {
+          error: "Weak password",
+          step: "validation",
+          details: { field: "adminPassword" },
         },
         { status: 400 },
       );
     }
 
-    // 2️⃣ Criar usuário no Auth
-    const { data: newUser, error: userErr } = await admin.auth.admin.createUser(
+    // SERVICE ROLE
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !serviceKey) {
+      return NextResponse.json(
+        { error: "Missing env", step: "env" },
+        { status: 500 },
+      );
+    }
+
+    const admin = createClient(url, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // 1) criar barbearia
+    const { data: shop, error: shopErr } = await admin
+      .from("barbershops")
+      .insert({ name, slug })
+      .select("id,name,slug")
+      .single();
+
+    if (shopErr || !shop) {
+      const err = shopErr as PostgrestError | null;
+      return NextResponse.json(
+        {
+          error: err?.message ?? "Shop insert failed",
+          step: "shop_insert",
+          details: err?.code ?? null,
+        },
+        { status: 400 },
+      );
+    }
+
+    // 2) criar user no auth
+    const { data: created, error: userErr } = await admin.auth.admin.createUser(
       {
-        email,
-        password,
+        email: adminEmail,
+        password: adminPassword,
         email_confirm: true,
+        user_metadata: adminName ? { name: adminName } : undefined,
       },
     );
 
-    if (userErr || !newUser.user) {
+    if (userErr || !created.user) {
       return NextResponse.json(
         {
           error: userErr?.message ?? "User create failed",
@@ -142,28 +198,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3️⃣ Criar profile
-    const { error: profileErr } = await admin.from("profiles").insert({
-      id: newUser.user.id,
+    // 3) criar profile
+    const { error: profileErr2 } = await admin.from("profiles").insert({
+      id: created.user.id,
       role: "admin",
       barbershop_id: shop.id,
+      ...(adminName ? { name: adminName } : {}),
     });
 
-    if (profileErr) {
+    if (profileErr2) {
+      const err = profileErr2 as PostgrestError;
       return NextResponse.json(
-        { error: profileErr.message, step: "profile_insert" },
+        {
+          error: err.message,
+          step: "profile_insert",
+          details: err.code ?? null,
+        },
         { status: 400 },
       );
     }
 
     return applyPendingCookies(
-      NextResponse.json({ ok: true, barbershopId: shop.id }),
+      NextResponse.json({
+        ok: true,
+        shop,
+        created_admin_email: adminEmail,
+      }),
     );
-  } catch {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Internal error", step: "catch" },
+      { error: "Internal error", step: "catch", details: message },
       { status: 500 },
     );
   }
-
 }
