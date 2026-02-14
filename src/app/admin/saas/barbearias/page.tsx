@@ -66,7 +66,6 @@ export default function SaaSBarbershopsPage() {
   const [slug, setSlug] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminName, setAdminName] = useState("");
-  const [adminPassword, setAdminPassword] = useState("");
 
   async function load() {
     setLoading(true);
@@ -130,10 +129,6 @@ export default function SaaSBarbershopsPage() {
     if (!name.trim()) return setMsg("Informe o nome da barbearia.");
     if (!adminEmail.trim())
       return setMsg("Informe o email do admin da barbearia.");
-    if (!adminPassword.trim())
-      return setMsg("Informe a senha do admin da barbearia.");
-    if (adminPassword.trim().length < 6)
-      return setMsg("Senha fraca. Use pelo menos 6 caracteres.");
 
     setLoading(true);
 
@@ -145,7 +140,6 @@ export default function SaaSBarbershopsPage() {
         slug: slug.trim() || undefined,
         adminEmail: adminEmail.trim(),
         adminName: adminName.trim() || undefined,
-        adminPassword: adminPassword.trim(),
       }),
     });
 
@@ -159,21 +153,18 @@ export default function SaaSBarbershopsPage() {
 
     const okJson = json as {
       shop?: { name?: string; slug?: string };
-      created_admin_email?: string;
-      created_with_password?: boolean;
+      invited_admin_email?: string;
     };
 
     setMsg(
-      `✅ Barbearia criada: ${okJson.shop?.name ?? name} (slug: ${
-        okJson.shop?.slug ?? slug
-      }). Admin criado: ${okJson.created_admin_email ?? adminEmail} (senha definida).`,
+      `✅ Barbearia criada: ${okJson.shop?.name ?? name} (slug: ${okJson.shop?.slug ?? slug
+      }). Convite enviado para ${okJson.invited_admin_email ?? adminEmail}`,
     );
 
     setName("");
     setSlug("");
     setAdminEmail("");
     setAdminName("");
-    setAdminPassword("");
 
     await load();
     setLoading(false);
@@ -266,8 +257,8 @@ export default function SaaSBarbershopsPage() {
             SaaS <span className="text-yellow-400">Barbearias</span>
           </h1>
           <p className="text-sm sm:text-base text-zinc-400">
-            Você (admin da plataforma) cria barbearias e define a senha do admin
-            do cliente.
+            Você (admin da plataforma) cria barbearias e convida o admin do
+            cliente.
           </p>
         </header>
 
@@ -364,19 +355,6 @@ export default function SaaSBarbershopsPage() {
                 placeholder="Ex: João"
               />
             </div>
-
-            {/* ✅ NOVO: senha do admin */}
-            <div className="lg:col-span-2">
-              <label className="text-sm text-zinc-400">Admin (senha)</label>
-              <input
-                type="password"
-                className="w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg px-3 py-3 outline-none"
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
-                placeholder="mínimo 6 caracteres"
-                autoComplete="new-password"
-              />
-            </div>
           </div>
 
           <button
@@ -384,7 +362,7 @@ export default function SaaSBarbershopsPage() {
             disabled={loading}
             className="w-full sm:w-auto h-12 px-6 rounded-xl bg-yellow-400 text-black font-black hover:opacity-95 transition disabled:opacity-50"
           >
-            {loading ? "Criando..." : "Criar barbearia + criar admin"}
+            {loading ? "Criando..." : "Criar barbearia + convidar admin"}
           </button>
         </section>
 
@@ -419,11 +397,10 @@ export default function SaaSBarbershopsPage() {
                     <span className="min-w-0 break-words">{s.name}</span>
 
                     <span
-                      className={`text-xs px-2 py-1 rounded-full border ${
-                        s.is_active
+                      className={`text-xs px-2 py-1 rounded-full border ${s.is_active
                           ? "border-emerald-500 text-emerald-400"
                           : "border-zinc-600 text-zinc-400"
-                      }`}
+                        }`}
                     >
                       {s.is_active ? "ATIVA" : "DESATIVADA"}
                     </span>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 import { getCurrentBarbershopIdBrowser } from "@/lib/getCurrentBarbershopBrowser";
 
@@ -13,6 +14,8 @@ type Service = {
 
 export default function ServicosPage() {
   const supabase = createClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +26,10 @@ export default function ServicosPage() {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [duration, setDuration] = useState("");
+
+  // Se veio do onboarding, o onboarding vai mandar:
+  // /admin/servicos?next=/admin/onboarding?step=3
+  const nextUrl = searchParams.get("next");
 
   async function loadServices() {
     setLoading(true);
@@ -106,15 +113,17 @@ export default function ServicosPage() {
 
     setModalOpen(false);
     await loadServices();
+
+    // ✅ UX: se veio do onboarding, após salvar volta direto pro próximo passo
+    if (nextUrl) {
+      router.push(nextUrl);
+    }
   }
 
   async function handleDelete(service: Service) {
     if (!confirm(`Deseja remover o serviço "${service.name}"?`)) return;
 
-    const { error } = await supabase
-      .from("services")
-      .delete()
-      .eq("id", service.id);
+    const { error } = await supabase.from("services").delete().eq("id", service.id);
 
     if (error) {
       alert("Erro ao remover: " + error.message);

@@ -6,16 +6,6 @@ import { createClient } from "@/lib/supabase/browser";
 
 type Role = "admin" | "barber" | "client" | string;
 
-type ProfilesRow = {
-  role: Role | null;
-  barbershop_id: string | null;
-};
-
-type SessionTokens = {
-  access_token: string;
-  refresh_token: string;
-};
-
 export default function LoginClient() {
   const supabase = createClient();
   const router = useRouter();
@@ -45,25 +35,7 @@ export default function LoginClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function syncSessionToCookies(): Promise<void> {
-    const { data } = await supabase.auth.getSession();
-    const session = data.session;
-
-    if (!session?.access_token || !session?.refresh_token) return;
-
-    const payload: SessionTokens = {
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-    };
-
-    await fetch("/api/auth/set-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  }
-
-  async function redirectByRole(userId: string): Promise<void> {
+  async function redirectByRole(userId: string) {
     const redirectTo = searchParams.get("redirect");
     if (redirectTo) {
       router.replace(redirectTo);
@@ -74,7 +46,7 @@ export default function LoginClient() {
       .from("profiles")
       .select("role, barbershop_id")
       .eq("id", userId)
-      .single<ProfilesRow>();
+      .single();
 
     if (profErr || !profile?.role) {
       setMsg("Seu usuário não tem perfil válido no sistema.");
@@ -100,9 +72,7 @@ export default function LoginClient() {
     router.replace("/");
   }
 
-  async function handleLogin(
-    e: React.FormEvent<HTMLFormElement>,
-  ): Promise<void> {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
 
@@ -124,29 +94,18 @@ export default function LoginClient() {
       return;
     }
 
-    // 🔐 garante que a sessão fique também em cookies (para o middleware enxergar)
-    await syncSessionToCookies();
-
-    // ✅ pega o userId de forma segura (data.user pode vir null em alguns cenários)
-    let userId: string | null = data.user?.id ?? null;
-
-    if (!userId) {
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !userData.user?.id) {
-        setMsg("Login OK, mas não consegui obter o usuário.");
-        setLoading(false);
-        return;
-      }
-      userId = userData.user.id;
+    const user = data.user;
+    if (!user) {
+      setMsg("Não foi possível obter o usuário.");
+      setLoading(false);
+      return;
     }
 
-    await redirectByRole(userId);
+    await redirectByRole(user.id);
     setLoading(false);
   }
 
-  async function handleSetPassword(
-    e: React.FormEvent<HTMLFormElement>,
-  ): Promise<void> {
+  async function handleSetPassword(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
 
@@ -167,13 +126,12 @@ export default function LoginClient() {
 
     setLoading(true);
 
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    const user = userData.user;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (userErr || !user) {
-      setMsg(
-        "Sessão do convite não encontrada. Abra novamente o link do email.",
-      );
+    if (!user) {
+      setMsg("Sessão do convite não encontrada. Abra novamente o link do email.");
       setLoading(false);
       return;
     }
@@ -187,9 +145,6 @@ export default function LoginClient() {
       setLoading(false);
       return;
     }
-
-    // 🔐 garante cookies para o middleware após trocar a senha também
-    await syncSessionToCookies();
 
     setMsg("✅ Senha criada com sucesso! Entrando...");
     await redirectByRole(user.id);
@@ -221,9 +176,7 @@ export default function LoginClient() {
               className="w-full p-3 rounded bg-zinc-900 border border-white/10"
               placeholder="Seu email"
               value={email}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setEmail(e.target.value)
-              }
+              onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
             />
 
@@ -232,9 +185,7 @@ export default function LoginClient() {
               placeholder="Sua senha"
               type="password"
               value={password}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setPassword(e.target.value)
-              }
+              onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
             />
 
@@ -252,9 +203,7 @@ export default function LoginClient() {
               placeholder="Nova senha (mín. 6 caracteres)"
               type="password"
               value={newPassword}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setNewPassword(e.target.value)
-              }
+              onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
             />
 
@@ -263,9 +212,7 @@ export default function LoginClient() {
               placeholder="Confirmar nova senha"
               type="password"
               value={newPassword2}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setNewPassword2(e.target.value)
-              }
+              onChange={(e) => setNewPassword2(e.target.value)}
               autoComplete="new-password"
             />
 
