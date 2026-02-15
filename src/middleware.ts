@@ -55,13 +55,23 @@ export async function middleware(req: NextRequest) {
   const isBarberRoute = pathname.startsWith("/barbeiro");
 
   /**
-   * ✅ IMPORTANTE:
-   * Para rotas /api, a gente NÃO redireciona.
-   * Só força getUser() para permitir refresh de cookies e deixa a API responder JSON.
+   * ✅ CRÍTICO:
+   * Em /api, NÃO redireciona.
+   * E NÃO pode deixar uma request SEM cookie "sb-" limpar a sessão do browser.
+   *
+   * Então:
+   * - roda getUser() (para refresh quando há cookie)
+   * - só aplica pendingCookies se a request já tinha cookie sb-
    */
   if (isApiRoute) {
+    const hadSbCookie = req.cookies
+      .getAll()
+      .some((c) => c.name.startsWith("sb-"));
+
     await supabase.auth.getUser();
-    return applyPendingCookies(NextResponse.next());
+
+    const res = NextResponse.next();
+    return hadSbCookie ? applyPendingCookies(res) : res;
   }
 
   // Fora de /admin e /barbeiro, não exige auth
@@ -123,7 +133,7 @@ export async function middleware(req: NextRequest) {
       return applyPendingCookies(NextResponse.next());
     }
 
-    // Caso 2: admin também atende (se existir registro em barbers com profile_id = user.id)
+    // Caso 2: admin também atende
     if (profile.role === "admin") {
       const { data: barberRow, error: barberErr } = await supabase
         .from("barbers")
@@ -136,7 +146,6 @@ export async function middleware(req: NextRequest) {
       }
     }
 
-    // Sem permissão de barbeiro
     const url = req.nextUrl.clone();
     url.pathname = "/admin/agenda";
     return applyPendingCookies(NextResponse.redirect(url));
@@ -146,9 +155,8 @@ export async function middleware(req: NextRequest) {
 }
 
 /**
- * ✅ Matcher GLOBAL:
- * - garante que o Supabase SSR consiga manter/refreshar cookies em produção
- * - exclui assets do Next e favicon
+ * ✅ Matcher global:
+ * garante que SSR consiga manter/refreshar cookies em prod.
  */
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
