@@ -54,15 +54,7 @@ export async function middleware(req: NextRequest) {
   const isSaasRoute = pathname.startsWith("/admin/saas");
   const isBarberRoute = pathname.startsWith("/barbeiro");
 
-  /**
-   * ✅ CRÍTICO:
-   * Em /api, NÃO redireciona.
-   * E NÃO pode deixar uma request SEM cookie "sb-" limpar a sessão do browser.
-   *
-   * Então:
-   * - roda getUser() (para refresh quando há cookie)
-   * - só aplica pendingCookies se a request já tinha cookie sb-
-   */
+  // ✅ API: nunca redireciona; só faz refresh de cookie se a request já tinha sb-
   if (isApiRoute) {
     const hadSbCookie = req.cookies
       .getAll()
@@ -74,12 +66,12 @@ export async function middleware(req: NextRequest) {
     return hadSbCookie ? applyPendingCookies(res) : res;
   }
 
-  // Fora de /admin e /barbeiro, não exige auth
+  // Rotas públicas: não exige auth
   if (!isAdminRoute && !isBarberRoute) {
     return applyPendingCookies(NextResponse.next());
   }
 
-  // Checa sessão/usuário
+  // ✅ CRÍTICO: se getUser falhar, NÃO aplique cookies (senão ele apaga a sessão no refresh)
   const { data: authData, error: authErr } = await supabase.auth.getUser();
   const user = authData.user;
 
@@ -87,7 +79,7 @@ export async function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
-    return applyPendingCookies(NextResponse.redirect(url));
+    return NextResponse.redirect(url); // 🚫 sem applyPendingCookies
   }
 
   // Carrega perfil
@@ -100,7 +92,7 @@ export async function middleware(req: NextRequest) {
   if (profErr || !profile) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
-    return applyPendingCookies(NextResponse.redirect(url));
+    return NextResponse.redirect(url); // 🚫 sem applyPendingCookies
   }
 
   // =========================
@@ -111,7 +103,7 @@ export async function middleware(req: NextRequest) {
       const url = req.nextUrl.clone();
       url.pathname =
         profile.role === "barber" ? "/barbeiro/dashboard" : "/login";
-      return applyPendingCookies(NextResponse.redirect(url));
+      return NextResponse.redirect(url); // 🚫 sem applyPendingCookies
     }
 
     // Admin SaaS somente quando barbershop_id = null
@@ -128,12 +120,10 @@ export async function middleware(req: NextRequest) {
   // BARBER ROUTES (/barbeiro)
   // =========================
   if (isBarberRoute) {
-    // Caso 1: perfil barber -> ok
     if (profile.role === "barber") {
       return applyPendingCookies(NextResponse.next());
     }
 
-    // Caso 2: admin também atende
     if (profile.role === "admin") {
       const { data: barberRow, error: barberErr } = await supabase
         .from("barbers")
@@ -154,10 +144,6 @@ export async function middleware(req: NextRequest) {
   return applyPendingCookies(NextResponse.next());
 }
 
-/**
- * ✅ Matcher global:
- * garante que SSR consiga manter/refreshar cookies em prod.
- */
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
