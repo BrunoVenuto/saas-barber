@@ -33,7 +33,7 @@ export default async function BarbershopLandingPage({
 }: {
   params: { slug: string };
 }) {
-  const supabase = createClient();
+  const { supabase } = createClient();
 
   const { data: shop, error } = await supabase
     .from("barbershops")

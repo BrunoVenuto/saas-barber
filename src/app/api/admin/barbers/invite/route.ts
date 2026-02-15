@@ -8,6 +8,13 @@ type InviteBarberBody = {
   phone?: string | null;
 };
 
+type ProfileRow = {
+  role: string | null;
+  barbershop_id: string | null;
+};
+
+type BarberIdRow = { id: string };
+
 function onlyDigits(v: string) {
   return (v || "").replace(/\D/g, "");
 }
@@ -24,42 +31,54 @@ function getString(obj: Record<string, unknown>, key: string): string | null {
 export async function POST(req: Request) {
   try {
     // 0) client com sessão do usuário logado (RLS normal)
-    const supabase = createAuthedClient();
+    const { supabase, applyToResponse } = createAuthedClient();
 
     const {
       data: { user },
       error: authErr,
     } = await supabase.auth.getUser();
 
+    // 🚫 não aplicar cookies no 401
     if (authErr || !user) {
       return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
     }
 
     // 1) valida admin de barbearia
-    const { data: profile, error: profErr } = await supabase
+    const { data: profData, error: profErr } = await supabase
       .from("profiles")
       .select("role, barbershop_id")
       .eq("id", user.id)
       .single();
 
+    const profile = profData as ProfileRow | null;
+
     if (profErr || !profile) {
-      return NextResponse.json(
+      const res = NextResponse.json(
         { error: "Perfil não encontrado." },
-        { status: 404 }
+        { status: 404 },
       );
+      return applyToResponse(res);
     }
 
     if (profile.role !== "admin" || !profile.barbershop_id) {
-      return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
+      const res = NextResponse.json(
+        { error: "Sem permissão." },
+        { status: 403 },
+      );
+      return applyToResponse(res);
     }
 
     const barbershopId = profile.barbershop_id;
 
     // 2) body
-    const raw = (await req.json().catch(() => null)) as unknown;
+    const raw: unknown = await req.json().catch(() => null);
 
     if (!isObject(raw)) {
-      return NextResponse.json({ error: "Body inválido." }, { status: 400 });
+      const res = NextResponse.json(
+        { error: "Body inválido." },
+        { status: 400 },
+      );
+      return applyToResponse(res);
     }
 
     const email = (getString(raw, "email") || "").trim().toLowerCase();
@@ -67,16 +86,18 @@ export async function POST(req: Request) {
     const phone = getString(raw, "phone");
 
     if (!email) {
-      return NextResponse.json(
+      const res = NextResponse.json(
         { error: "Informe o email do barbeiro." },
-        { status: 400 }
+        { status: 400 },
       );
+      return applyToResponse(res);
     }
     if (!name) {
-      return NextResponse.json(
+      const res = NextResponse.json(
         { error: "Informe o nome do barbeiro." },
-        { status: 400 }
+        { status: 400 },
       );
+      return applyToResponse(res);
     }
 
     const body: InviteBarberBody = {
@@ -90,10 +111,14 @@ export async function POST(req: Request) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!url || !serviceKey) {
-      return NextResponse.json(
-        { error: "Env faltando: NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY" },
-        { status: 500 }
+      const res = NextResponse.json(
+        {
+          error:
+            "Env faltando: NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY",
+        },
+        { status: 500 },
       );
+      return applyToResponse(res);
     }
 
     const adminSupabase = createServiceClient(url, serviceKey, {
@@ -103,15 +128,18 @@ export async function POST(req: Request) {
     // 4) redirect do convite -> passa primeiro pelo /callback pra setar sessão/cookies
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (!appUrl) {
-      return NextResponse.json(
-        { error: "Env faltando: NEXT_PUBLIC_APP_URL (ex: https://seuapp.vercel.app)" },
-        { status: 500 }
+      const res = NextResponse.json(
+        {
+          error:
+            "Env faltando: NEXT_PUBLIC_APP_URL (ex: https://seuapp.vercel.app)",
+        },
+        { status: 500 },
       );
+      return applyToResponse(res);
     }
 
     // ✅ Ajuste chave:
     // manda o usuário pro /callback (rota pública), e de lá redireciona pro /login?type=invite
-    // Obs: como /callback está dentro do route group (auth), o path público é /callback
     const nextAfterCallback = "/login?type=invite";
     const redirectTo = `${appUrl}/callback?next=${encodeURIComponent(nextAfterCallback)}`;
 
@@ -126,18 +154,20 @@ export async function POST(req: Request) {
       });
 
     if (inviteErr) {
-      return NextResponse.json(
+      const res = NextResponse.json(
         { error: `Falhou convite: ${inviteErr.message}` },
-        { status: 400 }
+        { status: 400 },
       );
+      return applyToResponse(res);
     }
 
-    const invitedUserId = invited?.user?.id;
+    const invitedUserId = invited?.user?.id ?? null;
     if (!invitedUserId) {
-      return NextResponse.json(
+      const res = NextResponse.json(
         { error: "Convite enviado, mas não consegui obter o ID do usuário." },
-        { status: 400 }
+        { status: 400 },
       );
+      return applyToResponse(res);
     }
 
     // 5) garante profiles do barbeiro
@@ -150,29 +180,34 @@ export async function POST(req: Request) {
           barbershop_id: barbershopId,
           name: body.name,
         },
-        { onConflict: "id" }
+        { onConflict: "id" },
       );
 
     if (upsertProfileErr) {
-      return NextResponse.json(
-        { error: `Convite ok, mas falhou profile: ${upsertProfileErr.message}` },
-        { status: 400 }
+      const res = NextResponse.json(
+        {
+          error: `Convite ok, mas falhou profile: ${upsertProfileErr.message}`,
+        },
+        { status: 400 },
       );
+      return applyToResponse(res);
     }
 
     // 6) cria registro em barbers (vincula pelo profile_id)
-    // Obs: se já existir (reinvite), evitamos duplicar.
-    const { data: existingBarber, error: existingErr } = await adminSupabase
+    const { data: existingData, error: existingErr } = await adminSupabase
       .from("barbers")
       .select("id")
       .eq("profile_id", invitedUserId)
       .maybeSingle();
 
+    const existingBarber = existingData as BarberIdRow | null;
+
     if (existingErr) {
-      return NextResponse.json(
+      const res = NextResponse.json(
         { error: `Falhou checar barbeiro: ${existingErr.message}` },
-        { status: 400 }
+        { status: 400 },
       );
+      return applyToResponse(res);
     }
 
     if (!existingBarber?.id) {
@@ -187,20 +222,24 @@ export async function POST(req: Request) {
         });
 
       if (insertBarberErr) {
-        return NextResponse.json(
+        const res = NextResponse.json(
           { error: `Falhou criar barbeiro: ${insertBarberErr.message}` },
-          { status: 400 }
+          { status: 400 },
         );
+        return applyToResponse(res);
       }
     }
 
-    return NextResponse.json({
+    // ✅ OK: aplica cookies pendentes só no final
+    const res = NextResponse.json({
       ok: true,
       invited_email: body.email,
       barber_user_id: invitedUserId,
       barbershop_id: barbershopId,
       redirectTo,
     });
+
+    return applyToResponse(res);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Erro inesperado.";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -171,7 +171,7 @@ export default function BarberDashboardPage() {
 
       if (!b.data) {
         setStatusMsg(
-          "Não encontrei o barbeiro vinculado a esse login. Verifique se barbers.profile_id está preenchido."
+          "Não encontrei o barbeiro vinculado a esse login. Verifique se barbers.profile_id está preenchido.",
         );
         return;
       }
@@ -200,7 +200,7 @@ export default function BarberDashboardPage() {
         client_name,
         client_phone,
         services:service_id ( name )
-      `
+      `,
       )
       .eq("barber_id", barberId)
       .eq("date", selectedDay)
@@ -224,7 +224,9 @@ export default function BarberDashboardPage() {
       services?: { name?: string | null } | null;
     };
 
-    const rows = Array.isArray(res.data) ? (res.data as AppointmentRowDb[]) : [];
+    const rows = Array.isArray(res.data)
+      ? (res.data as AppointmentRowDb[])
+      : [];
 
     // scheduled -> pending
     const mapped: Appointment[] = rows.map((a) => ({
@@ -254,7 +256,10 @@ export default function BarberDashboardPage() {
   async function confirmAppointment(ap: Appointment) {
     if (!barber) return;
 
-    console.log("[BARBER] confirm click", { apId: ap.id, phone: ap.client_phone });
+    console.log("[BARBER] confirm click", {
+      apId: ap.id,
+      phone: ap.client_phone,
+    });
 
     setUpdatingId(ap.id);
     setStatusMsg(null);
@@ -276,6 +281,7 @@ export default function BarberDashboardPage() {
 
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/confirm`, {
       method: "POST",
+      credentials: "include",
     });
 
     const json = await res.json().catch(() => null);
@@ -288,7 +294,7 @@ export default function BarberDashboardPage() {
     }
 
     setAppointments((prev) =>
-      prev.map((a) => (a.id === ap.id ? { ...a, status: "confirmed" } : a))
+      prev.map((a) => (a.id === ap.id ? { ...a, status: "confirmed" } : a)),
     );
 
     setUpdatingId(null);
@@ -297,19 +303,22 @@ export default function BarberDashboardPage() {
   async function cancelAppointment(ap: Appointment) {
     if (!barber) return;
 
-    console.log("[BARBER] cancel click", { apId: ap.id, phone: ap.client_phone });
+    console.log("[BARBER] cancel click", {
+      apId: ap.id,
+      phone: ap.client_phone,
+    });
 
     const mins = minutesUntil(ap);
     if (mins < CANCEL_MINUTES_NOTICE) {
       alert(
         `Cancelamento permitido somente com antecedência mínima de ${CANCEL_MINUTES_NOTICE} minutos.\n` +
-          `Faltam ${Math.max(mins, 0)} minutos para o horário.`
+          `Faltam ${Math.max(mins, 0)} minutos para o horário.`,
       );
       return;
     }
 
     const ok = confirm(
-      `Cancelar este agendamento?\n\n⚠️ Isso vai avisar o cliente no WhatsApp e marcar como canceled no sistema.`
+      `Cancelar este agendamento?\n\n⚠️ Isso vai avisar o cliente no WhatsApp e marcar como canceled no sistema.`,
     );
     if (!ok) return;
 
@@ -335,6 +344,7 @@ export default function BarberDashboardPage() {
 
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/cancel`, {
       method: "POST",
+      credentials: "include",
     });
 
     const json = await res.json().catch(() => null);
@@ -347,7 +357,7 @@ export default function BarberDashboardPage() {
     }
 
     setAppointments((prev) =>
-      prev.map((a) => (a.id === ap.id ? { ...a, status: "canceled" } : a))
+      prev.map((a) => (a.id === ap.id ? { ...a, status: "canceled" } : a)),
     );
 
     setUpdatingId(null);
@@ -359,7 +369,7 @@ export default function BarberDashboardPage() {
     console.log("[BARBER] complete click", { apId: ap.id });
 
     const ok = confirm(
-      `Marcar como CONCLUÍDO?\n\n${hhmm(ap.start_time)} • ${ap.client_name || "Cliente"}`
+      `Marcar como CONCLUÍDO?\n\n${hhmm(ap.start_time)} • ${ap.client_name || "Cliente"}`,
     );
     if (!ok) return;
 
@@ -368,6 +378,7 @@ export default function BarberDashboardPage() {
 
     const res = await fetch(`/api/barbeiro/appointments/${ap.id}/complete`, {
       method: "POST",
+      credentials: "include",
     });
 
     const json = await res.json().catch(() => null);
@@ -379,7 +390,7 @@ export default function BarberDashboardPage() {
     }
 
     setAppointments((prev) =>
-      prev.map((a) => (a.id === ap.id ? { ...a, status: "done" } : a))
+      prev.map((a) => (a.id === ap.id ? { ...a, status: "done" } : a)),
     );
 
     setUpdatingId(null);
@@ -390,7 +401,9 @@ export default function BarberDashboardPage() {
   // --------------------------
   const summary = useMemo(() => {
     const total = appointments.length;
-    const confirmed = appointments.filter((a) => a.status === "confirmed").length;
+    const confirmed = appointments.filter(
+      (a) => a.status === "confirmed",
+    ).length;
     const pending = appointments.filter((a) => a.status === "pending").length;
     const canceled = appointments.filter((a) => a.status === "canceled").length;
     const done = appointments.filter((a) => a.status === "done").length;
@@ -405,7 +418,9 @@ export default function BarberDashboardPage() {
         <section className="bg-zinc-950 border border-white/10 rounded-2xl p-4 sm:p-6">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div className="min-w-0">
-              <h2 className="text-xl sm:text-2xl font-black">📅 Agenda do dia</h2>
+              <h2 className="text-xl sm:text-2xl font-black">
+                📅 Agenda do dia
+              </h2>
               <p className="text-zinc-400 text-sm sm:text-base mt-1">
                 Barbeiro:{" "}
                 <span className="text-white font-semibold">
@@ -444,19 +459,27 @@ export default function BarberDashboardPage() {
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Pendentes</p>
-            <p className="text-2xl font-black text-yellow-300">{summary.pending}</p>
+            <p className="text-2xl font-black text-yellow-300">
+              {summary.pending}
+            </p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Confirmados</p>
-            <p className="text-2xl font-black text-green-400">{summary.confirmed}</p>
+            <p className="text-2xl font-black text-green-400">
+              {summary.confirmed}
+            </p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Concluídos</p>
-            <p className="text-2xl font-black text-emerald-300">{summary.done}</p>
+            <p className="text-2xl font-black text-emerald-300">
+              {summary.done}
+            </p>
           </div>
           <div className="bg-zinc-950 border border-white/10 rounded-xl p-4">
             <p className="text-zinc-400 text-sm">Cancelados</p>
-            <p className="text-2xl font-black text-red-400">{summary.canceled}</p>
+            <p className="text-2xl font-black text-red-400">
+              {summary.canceled}
+            </p>
           </div>
         </section>
 
@@ -489,7 +512,8 @@ export default function BarberDashboardPage() {
                 ap.status !== "canceled" &&
                 ap.status !== "done";
 
-              const canComplete = ap.status !== "canceled" && ap.status !== "done";
+              const canComplete =
+                ap.status !== "canceled" && ap.status !== "done";
 
               const waConfirmUrl = buildWhatsAppUrlConfirm(ap, barber?.name);
 
@@ -507,7 +531,9 @@ export default function BarberDashboardPage() {
 
                         <span className="text-zinc-300">
                           {ap.service_name ? (
-                            <span className="font-semibold">{ap.service_name}</span>
+                            <span className="font-semibold">
+                              {ap.service_name}
+                            </span>
                           ) : (
                             <span className="opacity-60">Serviço</span>
                           )}
@@ -520,12 +546,12 @@ export default function BarberDashboardPage() {
                             ap.status === "confirmed"
                               ? "text-green-400"
                               : ap.status === "pending"
-                              ? "text-yellow-300"
-                              : ap.status === "done"
-                              ? "text-emerald-300"
-                              : ap.status === "canceled"
-                              ? "text-red-400"
-                              : "text-zinc-300"
+                                ? "text-yellow-300"
+                                : ap.status === "done"
+                                  ? "text-emerald-300"
+                                  : ap.status === "canceled"
+                                    ? "text-red-400"
+                                    : "text-zinc-300"
                           }`}
                         >
                           {statusLabel(ap.status)}
@@ -549,11 +575,14 @@ export default function BarberDashboardPage() {
                         </span>
                       </div>
 
-                      {!canCancel && ap.status !== "canceled" && ap.status !== "done" && (
-                        <div className="text-xs text-amber-300 mt-1">
-                          ⚠️ Cancelamento só com {CANCEL_MINUTES_NOTICE} min de antecedência.
-                        </div>
-                      )}
+                      {!canCancel &&
+                        ap.status !== "canceled" &&
+                        ap.status !== "done" && (
+                          <div className="text-xs text-amber-300 mt-1">
+                            ⚠️ Cancelamento só com {CANCEL_MINUTES_NOTICE} min
+                            de antecedência.
+                          </div>
+                        )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
@@ -593,13 +622,17 @@ export default function BarberDashboardPage() {
                         disabled={!waConfirmUrl}
                         onClick={() => {
                           if (!waConfirmUrl) {
-                            alert("Esse agendamento não tem telefone do cliente.");
+                            alert(
+                              "Esse agendamento não tem telefone do cliente.",
+                            );
                             return;
                           }
                           const w = openWhatsAppWindow(waConfirmUrl);
                           console.log("[BARBER] manual whatsapp open", w);
                           if (!w) {
-                            setStatusMsg("Seu navegador bloqueou pop-ups. Permita para este site.");
+                            setStatusMsg(
+                              "Seu navegador bloqueou pop-ups. Permita para este site.",
+                            );
                           }
                         }}
                         className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black transition disabled:opacity-50"
